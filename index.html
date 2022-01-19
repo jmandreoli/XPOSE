@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Xpose dashboard</title>
+  <script src="/node_modules/dompurify/dist/purify.min.js"></script>
+  <script src="/node_modules/jquery/dist/jquery.js"></script>
+  <link rel="stylesheet" href="/node_modules/jqueryui/jquery-ui.min.css" />
+  <script src="/node_modules/simplemde/dist/simplemde.min.js"></script>
+  <link rel="stylesheet" href="/node_modules/simplemde/dist/simplemde.min.css" />
+  <script src="/node_modules/@json-editor/json-editor/dist/jsoneditor.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="xpose.js"></script>
+</head>
+<body>
+<!--
+Work progress
+-->
+<div id="xpose-progress" style="border:0;padding:0;"></div>
+
+<h1>Xpose: <span id="xpose-view"></span></h1>
+
+<!--
+Console view
+-->
+<div style="border:thin solid red; background-color:gray;">
+  <button style="border: thin solid red; float: right;" onclick="xpose.views.console.close()">
+    <span class="ui-icon ui-icon-arrowreturnthick-1-w"></span>
+  </button>
+  <p id="console" style="white-space:pre;"></p>
+</div>
+
+<!--
+Listing view
+-->
+<table>
+  <thead>
+    <tr>
+      <td>
+        <button type="button" id="listing-query" title="Refresh listing" onclick="xpose.views.listing.display()">
+          <span class="ui-icon ui-icon-refresh"></span>
+        </button>
+        <span>
+          <button type="button" title="Create a new entry" onclick="var s=this.nextElementSibling;s.style.display='';s.focus()">
+            <span class="ui-icon ui-icon-plusthick"></span>
+          </button>
+          <select id="xpose-new" style="display:none;position:absolute;background-color:white;z-index:1"
+            onchange="this.style.display='none';if(this.selectedIndex){xpose.views.entry.display_new(this.selectedOptions.item(0).value);this.selectedIndex=0}"
+          >
+            <option onclick="this.parentNode.style.display='none'" selected>Cancel</option>
+          </select>
+        </span>
+        <button type="button" title="Toggle query editor" onclick="toggle_display(document.getElementById('listing-editor'))">
+          <span class="ui-icon ui-icon-help"></span>
+        </button>
+        <span id="listing-count"></span> entries
+      </td>
+    </tr>
+    <tr><td><div id="listing-editor" style="display:none"></div></td></tr>
+  </thead>
+	<tbody id="listing"></tbody>
+</table>
+
+<!--
+Entry view
+-->
+<div>
+  <button type="button" title="Return to listing view" onclick="xpose.views.entry.close()">
+    <span class="ui-icon ui-icon-arrowreturnthick-1-w"></span>
+  </button>
+  <button type="button" id="entry-refresh" title="Refresh entry" onclick="xpose.views.entry.refresh()">
+    <span class="ui-icon ui-icon-refresh"></span>
+  </button>
+  <button type="button" id="entry-save" title="Save entry" onclick="xpose.views.entry.save()">
+    <span class="ui-icon ui-icon-arrowthickstop-1-n"></span>
+  </button>
+  <button type="button" id="entry-delete" title="Delete entry..." style="color:red;" onclick="xpose.views.entry.remove()">
+    <span class="ui-icon ui-icon-trash"></span>
+  </button>
+  <button type="button" id="entry-attach" title="Show attachments" onclick="xpose.views.attach.display(null)">
+    <span class="ui-icon ui-icon-folder-open"></span>
+  </button>
+  <span id="entry-short"></span>
+  <div id="entry"></div>
+</div>
+
+<!--
+Attachment view
+-->
+<table>
+  <thead>
+    <tr>
+      <td colspan="10">
+        <button type="button" title="Return to entry view" onclick="xpose.views.attach.close()">
+          <span class="ui-icon ui-icon-arrowreturnthick-1-w"></span>
+        </button>
+        <button type="button" id="attach-refresh" title="Refresh attachment" onclick="xpose.views.attach.refresh()">
+          <span class="ui-icon ui-icon-refresh"></span>
+        </button>
+        <span>
+          <button type="button" title="Upload a new attachment" onclick="document.getElementById('attach-upload').click()">
+            <span class="ui-icon ui-icon-plusthick"></span>
+          </button>
+          <input type="file" id="attach-upload" onchange="xpose.views.attach.upload(this.files)" style="display:none;">
+        </span>
+        <button type="button" id="attach-save" title="Save attachment" onclick="xpose.views.attach.save()">
+          <span class="ui-icon ui-icon-arrowthickstop-1-n"></span>
+        </button>
+        [<span id="attach-path"></span>] <span id="attach-short"></span>
+      </td>
+    </tr>
+  </thead>
+  <tbody id="attach"></tbody>
+  <tfoot>
+    <tr id="attach-uplevel">
+      <td>
+        <span class="ui-icon ui-icon-folder-open" onclick="xpose.views.attach.uplevel()"></span>
+      </td>
+      <td></td><td></td>
+      <td>[uplevel]</td>
+    </tr>
+  </tfoot>
+</table>
+
+</body>
+</html>
