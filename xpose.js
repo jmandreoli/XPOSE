@@ -26,8 +26,8 @@ class Xpose {
   }
   addView (name,view) {
     view.error = (label,x) => this.error(`${name}.${label}`,x)
-    view.ajaxError = this.ajaxError
-    view.progressor = this.progressor
+    view.ajaxError = (j,t,e) => this.ajaxError(j,t,e)
+    view.progressor = (label) => this.progressor(label)
     view.show = () => this.show(view)
     view.url = this.url; view.urla = this.urla; view.urlc = this.urlc
     view.views = this.views
@@ -42,10 +42,9 @@ class Xpose {
     this.el_view.innerHTML = view.name
     this.current.toplevel.style.display = ''
   }
-  progressor = (label) => {
+  progressor (label) {
     var div = document.createElement('div')
     div.innerHTML = `<progress max="1." value="0."></progress><button type="button"><span class="ui-icon ui-icon-closethick"></span></button> loading: <strong>${label}</strong>`
-    div.style.border = 'thin solid red'
     var el = div.firstElementChild
     var cancelled=false
     el.nextElementSibling.addEventListener('click',()=>{cancelled=true},false)
@@ -55,8 +54,8 @@ class Xpose {
       close:()=>{this.el_progress.removeChild(div)}
     }
   }
-  ajaxError = (jqxhr,textStatus,errorThrown) => { this.error('ajax',`${errorThrown}\n${jqxhr.responseText}`) }
-  error = (label,x) => { this.views.console.display(this.current,`ERROR: ${label}\n${x===null?'':x}`) }
+  ajaxError (jqxhr,textStatus,errorThrown) { this.error('ajax',`${errorThrown}\n${jqxhr.responseText}`) }
+  error (label,x) { this.views.console.display(this.current,`ERROR: ${label}\n${x===null?'':x}`) }
 }
 
 //
@@ -236,6 +235,7 @@ class attachView {
     this.el_updater = document.getElementById('attach-save')
     this.el_upload = document.getElementById('attach-upload')
     this.el_uplevel = document.getElementById('attach-uplevel')
+    this.chunk = 1
     this.entry = null
     this.path = null
     this.version = null
@@ -274,7 +274,7 @@ class attachView {
     files.forEach((file)=>{
       var progressor = this.progressor(file.name)
       upload({
-        file:file,url:this.urla,chunk:1,progress:progressor.update,
+        file:file,url:this.urla,chunk:this.chunk,progress:progressor.update,
         success: (target,mtime) => {progressor.close();this.addRow(target,mtime,file.size,file.name)},
         error: (err) => {progressor.close();this.error(err)}
       })
@@ -329,7 +329,7 @@ class attachView {
     var pname = new_name?'New file':name
     var rname = new_name||name
     tr.insertCell().innerHTML = mtime
-    tr.insertCell().innerHTML = size<0?`${-size} item${size==-1?'':'(s)'}`:format_size(size)
+    tr.insertCell().innerHTML = size<0?`${-size} item${size==-1?'':'(s)'}`:human_size(size)
     tr.insertCell().innerHTML = size<0?pname:`<a target="_blank" href="attach/${this.path}/${rname}">${pname}</a>`
     var inp = document.createElement('input')
     this.inputs.push([name,inp,new_name!==null])
@@ -366,15 +366,27 @@ class consoleView {
 }
 
 //
-// Uploader
+// Main call
+//
+
+xpose = null
+window.onload = function () {
+  xpose = new Xpose()
+  xpose.views.listing.display()
+}
+
+//
+// Utilities
 //
 
 function upload (req) {
-  // expected fields in req:
-  // file: a File or Blob object
-  // url protocol: must support POST with blob content and target in query string
-  // success(name,mtime),failure(err),progress(percentcomplete): callbacks
-  // chunk: int, in MiB
+  // req: object with the following fields
+  //   file: a File or Blob object
+  //   url protocol: must support POST with blob content and target in query string
+  //   success(name,mtime),failure(err),progress(percentcomplete): callbacks
+  //   chunk: int, in MiB
+  // Sends the file (method POST) to the given url
+  // The success callback is passed the file name and last modification time
   var target = ''
   var position = 0
   var nextPosition = 0
@@ -408,23 +420,9 @@ function upload (req) {
   upload1()
 }
 
-//
-// Main call
-//
-
-xpose = null
-window.onload = function () {
-  JSONEditor.defaults.options.theme = 'bootstrap4'
-  JSONEditor.defaults.options.iconlib = 'jqueryui'
-  xpose = new Xpose()
-  xpose.views.listing.display()
-}
-
-// Utilities
-
-toggle_display = function (el) { el.style.display = (el.style.display?'':'none') }
-short = function (entry) { return `[${entry.oid}] ${entry.short}` }
-format_size = function (size) {
+function human_size (size) {
+  // size: int (number of bytes)
+  // returns a human readable string representing size
   var thr = 1024.
   if (size<thr) return `${size}B`
   size /= thr
@@ -435,6 +433,11 @@ format_size = function (size) {
   }
   return `${size}YiB` // :-)
 }
-unsavedConfirm = ()=>{return window.confirm('Unsaved changes will be lost. Are you sure you want to proceed ?')}
-deleteConfirm = ()=>{return window.confirm('Are you sure you want to delete this entry ?')}
-noopAlert = ()=>{window.alert('Nothing to save !')}
+
+// short-hands
+
+function toggle_display (el) { el.style.display = (el.style.display?'':'none') }
+function short (entry) { return `[${entry.oid}] ${entry.short}` }
+function unsavedConfirm () { return window.confirm('Unsaved changes will be lost. Are you sure you want to proceed ?') }
+function deleteConfirm () { return window.confirm('Are you sure you want to delete this entry ?') }
+function noopAlert () { window.alert('Nothing to save !') }

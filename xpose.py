@@ -1,4 +1,4 @@
-import sys,os,sqlite3,shutil,json,re,traceback
+import sys,os,sqlite3,shutil,json,re
 from functools import cached_property, singledispatch
 from datetime import datetime
 from pathlib import Path
@@ -30,8 +30,7 @@ class XposeBase:
 
   attach_namer = None # global default, set up at the end of this file
 
-  def __init__(self,root='.',umask=0o2,attach_namer=None):
-    os.umask(umask)
+  def __init__(self,root='.',attach_namer=None):
     self.root = root = Path(root).resolve()
     self.attach = Attach((root/'attach').resolve(),attach_namer or self.attach_namer)
     self.cats = Cats((root/'cats').resolve())
@@ -40,32 +39,14 @@ class XposeBase:
   def connect(self,**ka):
     conn = sqlite3.connect(self.index_db,**ka)
     conn.create_function('oid_encoder',1,self.attach.namer.int2str)
-    conn.create_function('xpose_template',2,self.apply_template)
+    conn.create_function('xpose_template',3,self.apply_template)
     return conn
 
-  def initial(self,script):
-    assert self.root.is_dir()
-    p = self.cats.root
-    assert p.is_dir() and (p/'.visible.json').is_file()
-    p = self.attach.root
-    assert p.is_dir() and (p/'.uploaded').is_dir()
-    p = self.index_db
-    assert p.is_file()
-    if p.stat().st_size==0:
-      with self.connect() as conn:
-        conn.executescript(XposeSchema)
-        conn.executescript(script)
-        for cat in self.cats: self.cats[cat].initial(self)
-    return self
-
-  @cached_property
-  def template_loader(self):
-    from genshi.template import TemplateLoader
-    return TemplateLoader(str(self.cats.root/'templates'),auto_reload=True)
-
-  def apply_template(self,tmpl,args):
-    try: return self.template_loader.load(tmpl).generate(xpose=self,**json.loads(args)).render('html')
-    except: return f'<tbody><tr><td colspan=2><div style="white-space:pre">\n{traceback.format_exc()}\n<div></td></tr></tbody>'
+  def apply_template(self,tmpl,args,err_tmpl):
+    try: return self.cats.template_loader.load(tmpl).generate(xpose=self,**json.loads(args)).render('html')
+    except:
+      import traceback
+      return self.cats.template_loader.load(err_tmpl).generate(exc=traceback.format_exc()).render('html')
 
   @cached_property
   def url_base(self): return Path(os.environ['SCRIPT_NAME']).parent
@@ -164,6 +145,11 @@ Input is an (encoded) form with a single field "oid", which must denote the prim
 
 class XposeAttach (XposeBase,CGIMixin):
 
+  def __init__(self,umask=0o2,chunk=0x100000,**ka):
+    os.umask(umask)
+    self.chunk = chunk
+    super().__init__(**ka)
+
   def do_get(self):
     """
 Input is an (encoded) form with a single field "path".
@@ -194,7 +180,7 @@ Input is an octet stream.
     form = dict(parse_qsl(os.environ['QUERY_STRING']))
     target = form.get('target')
     assert os.environ['CONTENT_TYPE'] == 'application/octet-stream'
-    res = self.attach.upload(sys.stdin.buffer,int(os.environ['CONTENT_LENGTH']),target)
+    res = self.attach.upload(sys.stdin.buffer,int(os.environ['CONTENT_LENGTH']),target,chunk=self.chunk)
     content = dict(zip(('name','mtime','size'),res))
     return json.dumps(content), {'Content-Type':'text/json'}
 
@@ -206,6 +192,45 @@ Input is an octet stream.
     else: return None
 
 class XposeServer (XposeBase):
+
+  EventSchema = '''
+CREATE TABLE Event (
+  entry REFERENCES Entry ON DELETE CASCADE,
+  start DATETIME NOT NULL,
+  end DATETIME NOT NULL,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL,
+  path TEXT NOT NULL
+);
+
+CREATE INDEX EventIndexSource ON Event (source);
+
+CREATE INDEX EventIndexStart ON Event (start DESC);
+  '''
+
+  def initial(self,script=None):
+    assert self.root.is_dir()
+    p = self.cats.root
+    assert p.is_dir() and (p/'.visible.json').is_file()
+    p = self.attach.root
+    assert p.is_dir() and (p/'.uploaded').is_dir()
+    p = self.index_db
+    assert p.is_file()
+    if p.stat().st_size==0:
+      with self.connect() as conn:
+        conn.executescript(XposeSchema)
+        if script is not None: conn.executescript(script)
+        for cat in self.cats: self.cats[cat].initial(self)
+    return self
+
+  def dump(self,path):
+    def format(r):
+      return '{{"oid":{oid},"version":{version},"cat":"{cat}","value":{value},"attach":"{attach}","created":"{created}","modified":"{modified}"}}'.format(**r)
+    path = Path(path)
+    with self.connect() as conn,path.open('w') as v:
+      conn.row_factory = sqlite3.Row
+      listing = ',\n'.join(format(r) for r in conn.execute('SELECT * FROM Entry').fetchall())
+      v.write(f'{{{listing}}}\n')
 
   def precompute_trigger(self,table,cat,defn,when=None):
     """
@@ -266,10 +291,11 @@ class Attach:
 
   def rm(self,path): shutil.rmtree(self.root/path)
 
-  def upload(self,buf,size,target,chunk=65536):
+  def upload(self,buf,size,target,chunk):
     from tempfile import NamedTemporaryFile
-    p = self.root/'.uploaded'
-    with ((p/target).open('ab') if target else NamedTemporaryFile('wb',dir=p,prefix='',delete=False)) as v:
+    upload_dir = self.root/'.uploaded'
+    if size==0: (upload_dir/target).unlink(); return
+    with ((upload_dir/target).open('ab') if target else NamedTemporaryFile('wb',dir=upload_dir,prefix='',delete=False)) as v:
       f = Path(v.name)
       try:
         while size>0:
@@ -285,6 +311,10 @@ class Attach:
 
 class Cats:
   def __init__(self,root): self.root = root.resolve()
+  @cached_property
+  def template_loader(self):
+    from genshi.template import TemplateLoader
+    return TemplateLoader(str(self.root/'templates'),auto_reload=True)
   @cached_property
   def contents(self):
     with (self.root/'.visible.json').open() as u: return dict((cat,None) for cat in json.load(u))
@@ -367,4 +397,5 @@ class IntStrConverter:
     n = int(x,2)
     return (n-self.seed)%0x100000
 
+# Beware: if you change this line, all the current oid encodings will be fucked up
 XposeBase.attach_namer = IntStrConverter(seed=0xe1e06,perm=(17,12,9,6,11,14,0,4,19,8,1,18,3,7,5,16,10,2,15,13))

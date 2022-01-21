@@ -1,0 +1,7 @@
+h1 { background-color: black; color: white; }
+#listing td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
+#listing td:hover { background-color: lavender; }
+#attach td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
+#xpose-progress div { border: thin solid red; }
+div.console { border: thin solid red; background-color: linen; }
+div.console button { border: thin solid red; float: right; }

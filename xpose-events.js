@@ -72,7 +72,7 @@ class XposeCalendar {
     this.currentYears = ''
     console.log('Loading',years)
     var sql = `SELECT entry as oid,start,end,title,source,
-      xpose_template('events/'||Entry.cat||'.xhtml','{"value":'||Entry.value||',"attach":"'||Entry.attach||'"}') as details FROM Event,Entry
+      xpose_template('events/'||Entry.cat||'.xhtml','{"value":'||Entry.value||',"attach":"'||Entry.attach||'"}','events/error.xhtml') as details FROM Event,Entry
       WHERE entry=Entry.oid AND start BETWEEN '${start}-01-01' AND '${end}-12-31' AND source IN (${this.sources}) ORDER BY start DESC
     `
     jQuery.ajax({
