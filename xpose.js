@@ -252,7 +252,7 @@ class attachView {
     }
     this.el_short.innerHTML = this.entry.short
     jQuery.ajax({
-      url:this.urla,data:{path:path},
+      url:this.urla,data:{path:path},cache:false,
       success: (data)=>{this.display1(path,data)},
       error: this.ajaxError
     })

@@ -44,9 +44,9 @@ class XposeCalendar {
     })
     this.sources = sources.join(',')
 
-    header.insertCell().innerHTML = xpose.header
+    header.insertCell().innerHTML = xpose.header||''
 
-    this.url = new URL(xpose.url,location.href).href
+    this.url = xpose.url
     var sql = `SELECT min(start) as low,max(start) as high FROM Event WHERE source IN (${this.sources})`
     jQuery.ajax({
       url:this.url,data:{sql:sql},
@@ -59,7 +59,13 @@ class XposeCalendar {
         navigation.insertAdjacentHTML('afterend',`<span>(since ${low.getFullYear()})</span>`)
       }
     })
-    if (xpose.md) { this.mdConverter = new showdown.Converter(xpose.md) }
+    if (window.Showdown) {
+      var conv = new showdown.Converter(window.Showdown)
+      this.transformMarkdown = (a) => {a.forEach((el)=>{el.innerHTML = conv.makeHtml(el.innerHTML)})}
+    }
+    if (window.MathJax) {
+      this.transformMath = (a) => {if(a.length)window.MathJax.typeset(a)}
+    }
     this.currentYears = null
     return new FullCalendar.Calendar(divCal,cal)
   }
@@ -72,7 +78,7 @@ class XposeCalendar {
     this.currentYears = ''
     console.log('Loading',years)
     var sql = `SELECT entry as oid,start,end,title,source,
-      xpose_template('events/'||Entry.cat||'.xhtml','{"value":'||Entry.value||',"attach":"'||Entry.attach||'"}','events/error.xhtml') as details FROM Event,Entry
+      xpose_template('events/'||Entry.cat,'{"value":'||Entry.value||',"attach":"'||Entry.attach||'"}','events/error') as details FROM Event,Entry
       WHERE entry=Entry.oid AND start BETWEEN '${start}-01-01' AND '${end}-12-31' AND source IN (${this.sources}) ORDER BY start DESC
     `
     jQuery.ajax({
@@ -84,36 +90,27 @@ class XposeCalendar {
 
   process (data) {
     this.el_details.innerHTML = ''
-    var events = []
-    data.forEach((row)=>{
-      var ev = {id:`EV-${row.oid}`,start:row.start,end:row.end,title:row.title,extendedProps:{source:row.source}}
-      events.push(ev)
-      this.el_details.insertAdjacentHTML('beforeend',row.details)
-      var tbody = this.el_details.lastElementChild
-      tbody.id = ev.id
-      var td = tbody.insertRow(0).insertCell()
-      td.colSpan = 2; td.className = 'setting'
-      var options = this.sourceMap[row.source].options
-      Object.entries(options).forEach(([opt,val])=>{ev[opt]=val})
-      td.style.backgroundColor = options.backgroundColor||'black'
-      td.style.color = options.textColor||'white'
-      var extra = tbody.dataset.left||''
-      var status = tbody.dataset.right||''
-      if (status) {status = `<div class="status">${status}</div>`}
-      td.innerHTML = `${moment(row.start).format('llll')} ${extra} ${status}`
-    })
-    if (this.mdConverter) {
-      var mds = this.el_details.getElementsByClassName('md') // treatment of markdown divs
-      for (var i=0;i<mds.length;i++) {
-        var div = mds[i]
-        div.innerHTML = this.mdConverter.makeHtml(div.innerHTML)
-        var links = div.getElementsByTagName('a') // forcing http links to open in new window
-        for (var j=0;j<links.length;j++) {
-          var a = links[j]
-          if (new URL(a.getAttribute('href'),this.url).protocol.startsWith('http')) {a.setAttribute('target','_blank')}
-        }
-      }
-    }
+    var events = data.map((row)=>this.process_row(row))
+    if (this.transformMarkdown) { this.transformMarkdown(Array.from(this.el_details.getElementsByClassName('transform-markdown'))) }
+    if (this.transformMath) { this.transformMath(Array.from(this.el_details.getElementsByClassName('transform-math'))) }
     return events
+  }
+
+  process_row (row) {
+    var ev = {id:`EV-${row.oid}`,start:row.start,end:row.end,title:row.title,extendedProps:{source:row.source}}
+    this.el_details.insertAdjacentHTML('beforeend',row.details)
+    var tbody = this.el_details.lastElementChild
+    tbody.id = ev.id
+    var td = tbody.insertRow(0).insertCell()
+    td.colSpan = 2; td.className = 'setting'
+    var options = this.sourceMap[row.source].options
+    Object.entries(options).forEach(([opt,val])=>{ev[opt]=val})
+    td.style.backgroundColor = options.backgroundColor||'black'
+    td.style.color = options.textColor||'white'
+    var extra = tbody.dataset.left||''
+    var status = tbody.dataset.right||''
+    if (status) {status = `<div class="status">${status}</div>`}
+    td.innerHTML = `${moment(row.start).format('llll')} ${extra} ${status}`
+    return ev
   }
 }

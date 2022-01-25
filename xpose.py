@@ -1,7 +1,9 @@
 import sys,os,sqlite3,shutil,json,re
+import traceback
 from functools import cached_property, singledispatch
 from datetime import datetime
 from pathlib import Path
+if not hasattr(Path,'hardlink_to'): Path.hardlink_to = lambda self,target: Path(target).link_to(self)
 from http import HTTPStatus
 from urllib.parse import parse_qs, parse_qsl,urljoin
 #sqlite3.register_converter('json',json.loads)
@@ -18,7 +20,7 @@ CREATE TABLE Entry (
 );
 
 CREATE TRIGGER EntryAttach AFTER INSERT ON Entry
-  BEGIN UPDATE Entry SET attach=oid_encoder(oid) WHERE oid=NEW.oid; END;
+  BEGIN UPDATE Entry SET attach=oid_encoder(oid,attach) WHERE oid=NEW.oid; END;
 
 CREATE TABLE Short (
   entry REFERENCES Entry ON DELETE CASCADE,
@@ -38,15 +40,13 @@ class XposeBase:
 
   def connect(self,**ka):
     conn = sqlite3.connect(self.index_db,**ka)
-    conn.create_function('oid_encoder',1,self.attach.namer.int2str)
+    conn.create_function('oid_encoder',2,(lambda oid,attach,c=self.attach.namer.int2str:c(oid)))
     conn.create_function('xpose_template',3,self.apply_template)
     return conn
 
   def apply_template(self,tmpl,args,err_tmpl):
-    try: return self.cats.template_loader.load(tmpl).generate(xpose=self,**json.loads(args)).render('html')
-    except:
-      import traceback
-      return self.cats.template_loader.load(err_tmpl).generate(exc=traceback.format_exc()).render('html')
+    try: return self.cats.load_template(tmpl+'.xhtml').generate(xpose=self,**json.loads(args)).render('html')
+    except: return self.cats.load_template(err_tmpl+'.xhtml').generate().render('html')
 
   @cached_property
   def url_base(self): return Path(os.environ['SCRIPT_NAME']).parent
@@ -223,14 +223,59 @@ CREATE INDEX EventIndexStart ON Event (start DESC);
         for cat in self.cats: self.cats[cat].initial(self)
     return self
 
-  def dump(self,path):
-    def format(r):
-      return '{{"oid":{oid},"version":{version},"cat":"{cat}","value":{value},"attach":"{attach}","created":"{created}","modified":"{modified}"}}'.format(**r)
+  def load(self,path,with_oid=False):
+    def get_fields(conn):
+      cur = conn.execute('PRAGMA table_info(Entry)')
+      n, = (n for n,d in enumerate(cur.description) if d[0]=='name')
+      fields = [x[n] for x in cur]
+      cur.close()
+      return fields
+    def entry(row,i):
+      assert set(row) == field_set, set(row)^field_set
+      value = row['value']
+      self.cats[row['cat']].validator.validate(value)
+      row['value'] = json.dumps(value)
+      a = f'{i:04x}'; a = f'{a[:2]}/{a[2:]}' # arbitrary 1-1 encoding of i
+      Info[a] = row['attach']; row['attach'] = a
+      return tuple(row[f] for f in fields)
+    def oid_encoder(oid,a,enc=self.attach.namer.int2str):
+      a = Info[a]
+      p = enc(oid)
+      root = self.attach.root/p
+      if a is not None:
+        for name,src in a.items():
+          trg = root/name
+          trg.parent.mkdir(parents=True,exist_ok=True)
+          trg.hardlink_to(src)
+      return p
     path = Path(path)
-    with self.connect() as conn,path.open('w') as v:
+    with path.open() as u: listing = json.load(u)['listing']
+    with self.connect() as conn:
+      conn.create_function('oid_encoder',2,oid_encoder) # overrides the default
+      fields = get_fields(conn)
+      if not with_oid: fields.remove('oid')
+      field_set = set(fields)
+      sql = f'INSERT INTO Entry ({",".join(fields)}) VALUES ({",".join(len(fields)*["?"])})'
+      Info = {}
+      conn.executemany(sql,[entry(row,i) for i,row in enumerate(listing)])
+      conn.commit()
+
+  def dump(self,path,where=None,with_oid=False):
+    def trans(row):
+      row = dict(row)
+      if not with_oid: del row['oid']
+      p = self.attach.root/row['attach']
+      row['attach'] = dict((str(f.relative_to(p)),str(f)) for f in p.glob('**/*') if not f.is_dir()) or None
+      row['value'] = json.loads(row['value'])
+      return row
+    where_ = '' if where is None else f' WHERE {where}'
+    with self.connect() as conn:
       conn.row_factory = sqlite3.Row
-      listing = ',\n'.join(format(r) for r in conn.execute('SELECT * FROM Entry').fetchall())
-      v.write(f'{{{listing}}}\n')
+      listing = list(map(trans,conn.execute(f'SELECT * FROM Entry{where_}').fetchall()))
+      ts = datetime.now().isoformat(timespec='seconds')
+    path = Path(path)
+    with path.open('w') as v:
+      json.dump({'meta':{'origin':'XposeDump','timestamp':ts,'root':str(self.root),'where':where},'listing':listing},v,indent=1)
 
   def precompute_trigger(self,table,cat,defn,when=None):
     """
@@ -260,7 +305,7 @@ class Attach:
     return path,level
 
   def ls(self,path):
-    def E(p): s = p.stat(); return p.is_dir(),p.name,datetime.fromtimestamp(s.st_mtime).isoformat().rsplit('.',1)[0],(s.st_size if p.is_file() else -len(list(p.iterdir())))
+    def E(p): s = p.stat(); return p.is_dir(),p.name,datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds'),(s.st_size if p.is_file() else -len(list(p.iterdir())))
     if not path.is_dir(): return []
     content = L = sorted(map(E,path.iterdir()))
     while not L:
@@ -307,7 +352,7 @@ class Attach:
           size -= n
       except: f.unlink(); raise
     s = f.stat()
-    return f.name,datetime.fromtimestamp(s.st_mtime).isoformat().rsplit('.',1)[0],s.st_size
+    return f.name,datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds'),s.st_size
 
 class Cats:
   def __init__(self,root): self.root = root.resolve()
@@ -315,6 +360,7 @@ class Cats:
   def template_loader(self):
     from genshi.template import TemplateLoader
     return TemplateLoader(str(self.root/'templates'),auto_reload=True)
+  def load_template(self,tmpl): return self.template_loader.load(tmpl)
   @cached_property
   def contents(self):
     with (self.root/'.visible.json').open() as u: return dict((cat,None) for cat in json.load(u))
@@ -363,16 +409,16 @@ def _(x,base,pat=re.compile(r'(\[.*?\])\((.*?)( .*?)?\)')):
   return pat.sub((lambda m: f'{m.group(1)}({urljoin(base,m.group(2))}{m.group(3) or ""})'),x)
 
 class IntStrConverter:
-  seed : int # any integer
+  shift : int # any integer
   perm : tuple # must be permutation of range(0,20)
   symbols : str # must be of length 32 with all distinct characters
 
-  def __init__(self,seed=None,perm=None,symbols=None,check=False):
+  def __init__(self,shift=None,perm=None,symbols=None,check=False):
     from random import randint, shuffle
     from string import ascii_uppercase, digits
-    if seed is None: seed = randint(0,0x100000)
-    elif check: assert isinstance(seed,int)
-    self.seed = seed
+    if shift is None: shift = randint(0,0x100000)
+    elif check: assert isinstance(shift,int)
+    self.shift = shift
     if perm is None: perm = list(range(20)); shuffle(perm)
     elif check: assert len(perm)==20 and list(set(perm)) == list(range(20))
     self.perm = perm
@@ -384,7 +430,7 @@ class IntStrConverter:
 
   def int2str(self,n:int)->str:
     #assert n < 0x100000
-    n = (n+self.seed)%0x100000 # shift
+    n = (n+self.shift)%0x100000 # shift
     x = f'{n:020b}' # 20-digit binary
     x = ''.join(x[i] for i in self.perm) # permute the bits
     x = ''.join(self.symbols[int(x[i:i+5],2)] for i in range(0,20,5))
@@ -395,7 +441,7 @@ class IntStrConverter:
     x = ''.join(self.symbol_[u] for t in x.split('/',2) for u in t)
     x = ''.join(x[i] for i in self.perm_)
     n = int(x,2)
-    return (n-self.seed)%0x100000
+    return (n-self.shift)%0x100000
 
 # Beware: if you change this line, all the current oid encodings will be fucked up
-XposeBase.attach_namer = IntStrConverter(seed=0xe1e06,perm=(17,12,9,6,11,14,0,4,19,8,1,18,3,7,5,16,10,2,15,13))
+XposeBase.attach_namer = IntStrConverter(shift=0xe1e06,perm=(17,12,9,6,11,14,0,4,19,8,1,18,3,7,5,16,10,2,15,13))
