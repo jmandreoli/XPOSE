@@ -91,6 +91,7 @@ Input is an (encoded) form with a single field "sql", which must denote an SQLit
       elif (oid:=form.get('oid')) is not None:
         oid = int(oid)
         r = dict(conn.execute(self.sql_oid,(oid,)).fetchone())
+        r['short'] = r['short'].replace('"',r'\"')
         resp = '{{"oid":{oid},"version":{version},"cat":"{cat}","short":"{short}","value":{value},"attach":"{attach}"}}'.format(**r)
       else: http_raise(HTTPStatus.NOT_FOUND)
     return resp, {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
@@ -223,7 +224,7 @@ CREATE INDEX EventIndexStart ON Event (start DESC);
         for cat in self.cats: self.cats[cat].initial(self)
     return self
 
-  def load(self,path,with_oid=False):
+  def load(self,content,with_oid=False):
     def get_fields(conn):
       cur = conn.execute('PRAGMA table_info(Entry)')
       n, = (n for n,d in enumerate(cur.description) if d[0]=='name')
@@ -243,13 +244,17 @@ CREATE INDEX EventIndexStart ON Event (start DESC);
       p = enc(oid)
       root = self.attach.root/p
       if a is not None:
-        for name,src in a.items():
-          trg = root/name
-          trg.parent.mkdir(parents=True,exist_ok=True)
-          trg.hardlink_to(src)
+        try:
+          for name,src in a.items():
+            trg = root/name
+            trg.parent.mkdir(parents=True,exist_ok=True)
+            trg.hardlink_to(src)
+        except:
+          traceback.print_exc(file=sys.stderr); raise
       return p
-    path = Path(path)
-    with path.open() as u: listing = json.load(u)['listing']
+    if isinstance(content,list): listing = content
+    else:
+      with Path(content).open() as u: listing = json.load(u)['listing']
     with self.connect() as conn:
       conn.create_function('oid_encoder',2,oid_encoder) # overrides the default
       fields = get_fields(conn)
@@ -257,10 +262,11 @@ CREATE INDEX EventIndexStart ON Event (start DESC);
       field_set = set(fields)
       sql = f'INSERT INTO Entry ({",".join(fields)}) VALUES ({",".join(len(fields)*["?"])})'
       Info = {}
-      conn.executemany(sql,[entry(row,i) for i,row in enumerate(listing)])
+      listing = [entry(row,i) for i,row in enumerate(listing)]
+      conn.executemany(sql,listing)
       conn.commit()
 
-  def dump(self,path,where=None,with_oid=False):
+  def dump(self,path=None,where=None,with_oid=False):
     def trans(row):
       row = dict(row)
       if not with_oid: del row['oid']
@@ -273,6 +279,7 @@ CREATE INDEX EventIndexStart ON Event (start DESC);
       conn.row_factory = sqlite3.Row
       listing = list(map(trans,conn.execute(f'SELECT * FROM Entry{where_}').fetchall()))
       ts = datetime.now().isoformat(timespec='seconds')
+    if path is None: return listing
     path = Path(path)
     with path.open('w') as v:
       json.dump({'meta':{'origin':'XposeDump','timestamp':ts,'root':str(self.root),'where':where},'listing':listing},v,indent=1)

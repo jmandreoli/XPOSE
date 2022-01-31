@@ -110,7 +110,12 @@ class XposeCalendar {
     var extra = tbody.dataset.left||''
     var status = tbody.dataset.right||''
     if (status) {status = `<div class="status">${status}</div>`}
-    td.innerHTML = `${moment(row.start).format('llll')} ${extra} ${status}`
+    var span = (row.start.length==10)?
+      (row.end==row.start)?
+        moment(row.start).format('ddd MMM D, YYYY'): // single day
+        `${moment(row.start).format('MMM D')} -- ${moment(row.end).format('MMM D, YYYY')}`: // multi-day
+      moment(row.start).format('ddd MMM D, YYYY [at] h:mmA') // punctual
+    td.innerHTML = `${span} ${extra} ${status}`
     return ev
   }
 }

@@ -329,7 +329,7 @@ class attachView {
     var pname = new_name?'New file':name
     var rname = new_name||name
     tr.insertCell().innerHTML = mtime
-    tr.insertCell().innerHTML = size<0?`${-size} item${size==-1?'':'(s)'}`:human_size(size)
+    tr.insertCell().innerHTML = size<0?`${-size} item${size==-1?'':'s'}`:human_size(size)
     tr.insertCell().innerHTML = size<0?pname:`<a target="_blank" href="attach/${this.path}/${rname}">${pname}</a>`
     var inp = document.createElement('input')
     this.inputs.push([name,inp,new_name!==null])
