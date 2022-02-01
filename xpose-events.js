@@ -1,3 +1,9 @@
+/* Creation date:        2022-01-15
+ * Contributors:         Jean-Marc Andreoli
+ * Language:             javascript
+ * Purpose:              XposeCalendar: a calendar manager based on Xpose (client side)
+ */
+
 class XposeCalendar {
 
   constructor (el,cal,xpose) {
@@ -14,16 +20,15 @@ class XposeCalendar {
     var evSource = {id:xpose.id,events:(x,success,failure)=>{return this.events(x,success,failure)}}
     if (cal.eventSources) {cal.eventSources.push(evSource)}
     else {cal.eventSources = [evSource]}
-    var divCal = document.createElement('div')
-    divCal.className = 'xposecalendar'
-    el.appendChild(divCal)
+    this.el_calendar = document.createElement('div')
+    this.el_calendar.className = 'xposecalendar'
+    el.appendChild(this.el_calendar)
 
     this.el_details = document.createElement('table')
     this.el_details.className = 'xposedetails'
     el.appendChild(this.el_details)
 
-    header.innerHTML = '<span>Jump to:</span>'
-
+    header.insertCell().innerHTML = '<span>Jump to: </span>'
     var navigation = document.createElement('input')
     header.insertCell().appendChild(navigation)
     navigation.style.fontSize = 'x-small'
@@ -32,7 +37,7 @@ class XposeCalendar {
     navigation.addEventListener('focus',()=>{navigation.value=moment(calendar.view.currentStart).format('YYYY-MM-DD')},false)
     navigation.addEventListener('change',()=>{if(navigation.checkValidity()&&navigation.value){calendar.gotoDate(navigation.value)}},false)
 
-    header.insertCell().innerHTML = 'Sources:'
+    header.insertCell().innerHTML = '<span> Sources: </span>'
     var sources = []
     this.sourceMap = {}
     Object.values(xpose.sources).forEach((src)=>{
@@ -56,7 +61,7 @@ class XposeCalendar {
         var high = new Date(data.high); high.setFullYear(high.getFullYear()+1); high.setMonth(11); high.setDate(31)
         navigation.min = low.toISOString().substring(0,10)
         navigation.max = high.toISOString().substring(0,10)
-        navigation.insertAdjacentHTML('afterend',`<span>(since ${low.getFullYear()})</span>`)
+        navigation.insertAdjacentHTML('afterend',`<span> (since ${low.getFullYear()})</span>`)
       }
     })
     if (window.Showdown) {
@@ -67,7 +72,7 @@ class XposeCalendar {
       this.transformMath = (a) => {if(a.length)window.MathJax.typeset(a)}
     }
     this.currentYears = null
-    return new FullCalendar.Calendar(divCal,cal)
+    return new FullCalendar.Calendar(this.el_calendar,cal)
   }
 
   events (info,success,failure) {
@@ -75,6 +80,7 @@ class XposeCalendar {
     var end = new Date(info.end);end.setSeconds(end.getSeconds()-1);end=end.getFullYear()
     var years = `${start}-${end}`
     if (this.currentYears==years||this.currentYears=='') {return}
+    this.el_calendar.style.pointerEvents='none' // avoids bursts of updates, restored after ajax
     this.currentYears = ''
     console.log('Loading',years)
     var sql = `SELECT entry as oid,start,end,title,source,
@@ -84,8 +90,8 @@ class XposeCalendar {
     jQuery.ajax({
       url:this.url,data:{sql:sql},
       success:(data)=>{success(this.process(data));this.currentYears=years},
-      failure:(err)=>{failure(err)}
-    })
+      error:(jqxhr,textStatus,errorThrown)=>{failure(errorThrown);this.el_details.innerHTML=`<pre>Error ${errorThrown}\n${jqxhr.responseText}</pre>`}
+    }).always(()=>this.el_calendar.style.pointerEvents='auto')
   }
 
   process (data) {

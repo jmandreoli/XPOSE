@@ -1,3 +1,9 @@
+/* Creation date:        2022-01-15
+ * Contributors:         Jean-Marc Andreoli
+ * Language:             javascript
+ * Purpose:              Xpose: a JSON database manager (client side)
+ */
+
 //
 // Xpose
 //
@@ -25,9 +31,9 @@ class Xpose {
     jQuery.ajax({ url:'cats/.visible.json',cache:false,success:setupNew,error:this.ajaxError })
   }
   addView (name,view) {
-    view.error = (label,x) => this.error(`${name}.${label}`,x)
+    view.error = (label,x) => this.error(`${name}:${label}`,x)
     view.ajaxError = (j,t,e) => this.ajaxError(j,t,e)
-    view.progressor = (label) => this.progressor(label)
+    view.progressor = (label) => this.progressor(`${name}:${label}`)
     view.show = () => this.show(view)
     view.url = this.url; view.urla = this.urla; view.urlc = this.urlc
     view.views = this.views
@@ -44,7 +50,7 @@ class Xpose {
   }
   progressor (label) {
     var div = document.createElement('div')
-    div.innerHTML = `<progress max="1." value="0."></progress><button type="button"><span class="ui-icon ui-icon-closethick"></span></button> loading: <strong>${label}</strong>`
+    div.innerHTML = `<progress max="1." value="0."></progress><button type="button"><span class="ui-icon ui-icon-closethick"></span></button> <strong>${label}</strong>`
     var el = div.firstElementChild
     var cancelled=false
     el.nextElementSibling.addEventListener('click',()=>{cancelled=true},false)
