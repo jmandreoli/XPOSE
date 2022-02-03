@@ -10,8 +10,8 @@ r"""
 
 An Xpose instance is a directory (root) containing at least the following members:
 
-* ``index.db``: an index sqlite3 database (see schema below)
-* ``attach``: the attachment folder (potentially one subfolder for each entry in the index)
+* ``index.db``: an sqlite3 database (see schema below), called the index of the instance
+* ``attach``: the attachment folder with potentially one subfolder for each entry in the index
 * ``attach/.uploaded``: a folder for temporary file uploads
 * ``cats``: the category folder holding all the information related to the ``cat`` field in the index
 * ``cats/.visible.json``: the list of active categories
@@ -19,14 +19,14 @@ An Xpose instance is a directory (root) containing at least the following member
 * ``cats/templates``: `genshi templates <https://genshi.edgewall.org/>`_, one for each template type and each category
 * ``cats/utils``: python files, one for each category, defining attributes of the :class:`Cat` instances
 
-The schema of the index database has the following tables:
+The index database has the following tables:
 
 #. Table ``Entry`` with fields
 
-   * ``oid``: entry key as an :class:`int` (primary key of the database, autoincremented)
-   * ``version``: version of the entry as an :class:`int` (always incrementd on update)
+   * ``oid``: entry key as an :class:`int` (primary key of the database, auto-incremented)
+   * ``version``: version of the entry as an :class:`int` (always incremented on update)
    * ``cat``: category as a relative path (with no suffix) in the ``cats/utils`` and ``cats/jschemas`` folders
-   * ``value``: actual JSON encoded data, conforming to the category held by ``cat``
+   * ``value``: actual JSON encoded data, conforming to the JSON schema of the category held by ``cat``
    * ``attach``: relative path in the ``attach`` folder holding the attachments of this entry
    * ``created``: creation timestamp in ISO format YYYY-MM-DD[T]HH:MM:SS
    * ``modified``: last modification timestamp in same format as ``created``
@@ -44,8 +44,8 @@ from datetime import datetime
 from pathlib import Path
 if not hasattr(Path,'hardlink_to'): Path.hardlink_to = lambda self,target: Path(target).link_to(self)
 from http import HTTPStatus
-from urllib.parse import parse_qs, parse_qsl,urljoin
-from typing import Union, Sequence
+from urllib.parse import parse_qsl,urljoin
+from typing import Union, Callable, Dict, Any
 #sqlite3.register_converter('json',json.loads)
 
 XposeSchema = '''
@@ -63,9 +63,9 @@ CREATE TRIGGER EntryAttach AFTER INSERT ON Entry
   BEGIN UPDATE Entry SET attach=oid_encoder(oid,attach) WHERE oid=NEW.oid; END;
 
 CREATE TABLE Short (
-  entry REFERENCES Entry ON DELETE CASCADE,
+  entry INTEGER PRIMARY KEY REFERENCES Entry ON DELETE CASCADE,
   value TEXT NOT NULL
-);
+) WITHOUT ROWID;
 '''
 
 #======================================================================================================================
@@ -75,7 +75,15 @@ An instances of this base class ia a resource for processing Xpose operations. A
   """
 #======================================================================================================================
 
-  attach_namer = None # global default, set up at the end of this file
+  attach_namer:Any = None # global default, set up at the end of this file
+  index_db: Path
+  r"""Path to the index database"""
+  root: Path
+  r"""Path to the root"""
+  attach: 'Attach'
+  r"""Object managing the attachments associated to this instance"""
+  cats: 'Cats'
+  r"""Object managing the categories associated to this instance"""
 
   def __init__(self,root:Union[str,Path]='.',attach_namer=None):
     self.root = root = Path(root).resolve()
@@ -83,19 +91,22 @@ An instances of this base class ia a resource for processing Xpose operations. A
     self.cats = Cats((root/'cats').resolve())
     self.index_db = (root/'index.db').resolve()
 
+#----------------------------------------------------------------------------------------------------------------------
   def connect(self,**ka):
+    r"""
+Returns a :class:`sqlite3.Connection` opened on the index database. The keyword arguments *ka* are passed as such to the connection constructor. Two user defined sqlite functions are made available:
+
+* :func:`oid_encoder` (arity 2): passed the current ``oid`` and ``attach`` fields from the database, it returns the oid encoding to set to the ``attach`` field.
+* :func:`apply_template` (arity 3): invokes method :meth:`apply_template` on the object held by the :attr:`cats` attribute; variable ``xpose`` denotes this instance
+    """
+#----------------------------------------------------------------------------------------------------------------------
     conn = sqlite3.connect(self.index_db,**ka)
     conn.create_function('oid_encoder',2,(lambda oid,attach,c=self.attach.namer.int2str:c(oid)))
-    conn.create_function('xpose_template',3,self.apply_template)
+    conn.create_function('xpose_template',3,(lambda tmpl,args,err_tmpl,t=self.cats.apply_template:t(tmpl,err_tmpl,xpose=self,**json.loads(args))))
     return conn
-
-  def apply_template(self,tmpl:str,args:dict,err_tmpl:str):
-    try: return self.cats.load_template(tmpl+'.xhtml').generate(xpose=self,**json.loads(args)).render('html')
-    except: return self.cats.load_template(err_tmpl+'.xhtml').generate().render('html')
 
   @cached_property
   def url_base(self): return Path(os.environ['SCRIPT_NAME']).parent
-
   def rebase(self,x:str,path:Union[str,Path]): return rebase(x,str(self.url_base/'attach'/path/'_'))
 
 #======================================================================================================================
@@ -105,7 +116,9 @@ A simple helper mixin that simplifies writing CGI resource classes. A resource c
   """
 #======================================================================================================================
 
+#----------------------------------------------------------------------------------------------------------------------
   def process_cgi(self):
+#----------------------------------------------------------------------------------------------------------------------
     method = os.environ['REQUEST_METHOD']
     do = getattr(self,'do_'+method.lower(),None)
     content,headers = '',{}
@@ -132,13 +145,15 @@ An instance of this class is a CGI resource managing the Xpose index database.
     FROM Entry LEFT JOIN Short ON Short.entry=oid
     WHERE oid=?'''
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input is expected as an (encoded) form with a single field. The field must be
+Input is expected as an (encoded) form with a single field. The field must be either of
 
-* ``sql``: value must denote an SQLite query of type ``SELECT`` only. Output is the tJSON formatted list of rows returned by the query. Each item in the list is a dictionary.
+* ``sql``: value must denote an SQLite query of type ``SELECT`` only. Output is the JSON formatted list of rows returned by the query. Each item in the list is a dictionary.
 * ``oid``: value must denote the key of a unique entry. Output is the corresponding JSON formatted entry, as a dictionary.
     """
+#----------------------------------------------------------------------------------------------------------------------
     form = dict(parse_qsl(os.environ['QUERY_STRING']))
     with self.connect() as conn:
       conn.row_factory = sqlite3.Row
@@ -154,20 +169,24 @@ Input is expected as an (encoded) form with a single field. The field must be
       else: http_raise(HTTPStatus.NOT_FOUND)
     return resp, {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
     """
 Input is expected as an (encoded) form with a single field ``sql``, which must denote an arbitrary SQLite script.
     """
+#----------------------------------------------------------------------------------------------------------------------
     form = parse_input()
     sql = form['sql'].strip()
     with self.connect() as conn:
       c = conn.executescript(sql)
       return dict(total_changes=conn.total_change,lastrowid=c.lastrowid), {'Content-Type':'text/json'}
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     """
 Input is expected as any JSON encoded entry. Validation is not performed.
     """
+#----------------------------------------------------------------------------------------------------------------------
     entry = parse_input('text/json')
     oid,version,value = entry.get('oid'),entry.get('version'),json.dumps(entry['value'])
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -180,26 +199,28 @@ Input is expected as any JSON encoded entry. Validation is not performed.
         sql = 'UPDATE Entry SET version=iif(version=?,?,NULL),value=?,modified=? WHERE oid=?',(version,version+1,value,now,int(oid))
       try: res = conn.execute(*sql)
       except sqlite3.IntegrityError: http_raise(HTTPStatus.CONFLICT)
-      conn.commit()
       if oid is None: oid = res.lastrowid
       attach,short = conn.execute('SELECT attach,Short.value FROM Entry,Short WHERE Short.entry=? AND oid=?',(oid,oid)).fetchone()
     return json.dumps({'oid':oid,'version':version+1,'short':short,'attach':attach}), {'Content-Type':'text/json'}
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_delete(self):
     """
 Input is expected as an (encoded) form with a single field ``oid``, which must denote the primary key of an Entry.
     """
+#----------------------------------------------------------------------------------------------------------------------
     form = parse_input()
     oid = int(form['oid'])
     with self.connect() as conn:
       conn.execute('PRAGMA foreign_keys = ON')
       conn.execute('DELETE FROM Entry WHERE oid=?',(oid,))
-      conn.commit()
     try: self.attach.rm(self.attach.namer.int2str(oid))
     except FileNotFoundError: pass
     return json.dumps({'oid':oid}), {'Content-Type':'text/json'}
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_head(self):
+#----------------------------------------------------------------------------------------------------------------------
     return 'héllo world', {'Content-Type':'text/plain; charset=UTF-8'}
 
 #======================================================================================================================
@@ -214,22 +235,26 @@ An instance of this class is a CGI resource managing the Xpose attachment folder
     self.chunk = chunk
     super().__init__(**ka)
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     """
 Input is expected as an (encoded) form with a single field ``path``.
     """
+#----------------------------------------------------------------------------------------------------------------------
     form = dict(parse_qsl(os.environ['QUERY_STRING']))
     path,level = self.attach.getpath(form['path'])
     content = self.attach.ls(path)
     return json.dumps({'content':content,'version':self.version(path),'toplevel':level==0}),{'Content-Type':'text/json'}
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     """
 Input is expected as a JSON encoded list of pairs of paths.
     """
+#----------------------------------------------------------------------------------------------------------------------
     content = parse_input('text/json')
     path,version,ops = content['path'],content['version'],content['ops']
-    with self.connect(isolation_level='IMMEDIATE'): # only to ensure isolation
+    with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations
       path,level = self.attach.getpath(path)
       if self.version(path) != version: http_raise(HTTPStatus.CONFLICT)
       errors = [err for op in ops if (err:=self.attach.do(path,op['src'].strip(),op['trg'].strip(),bool(op['is_new']))) is not None]
@@ -237,10 +262,12 @@ Input is expected as a JSON encoded list of pairs of paths.
       version = self.version(path)
     return json.dumps({'content':content,'version':version,'toplevel':level==0,'errors':errors}), {'Content-Type':'text/json'}
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
     """
 Input is expected as an octet stream.
     """
+#----------------------------------------------------------------------------------------------------------------------
     form = dict(parse_qsl(os.environ['QUERY_STRING']))
     target = form.get('target')
     assert os.environ['CONTENT_TYPE'] == 'application/octet-stream'
@@ -248,8 +275,10 @@ Input is expected as an octet stream.
     content = dict(zip(('name','mtime','size'),res))
     return json.dumps(content), {'Content-Type':'text/json'}
 
+#----------------------------------------------------------------------------------------------------------------------
   @staticmethod
   def version(path:Path):
+#----------------------------------------------------------------------------------------------------------------------
     if path.exists():
       s = path.stat()
       return [s.st_ino,s.st_mtime]
@@ -264,13 +293,13 @@ An instance of this class provides various management operations on an Xpose ins
 
   EventSchema = '''
 CREATE TABLE Event (
-  entry REFERENCES Entry ON DELETE CASCADE,
+  entry INTEGER PRIMARY KEY REFERENCES Entry ON DELETE CASCADE,
   start DATETIME NOT NULL,
   end DATETIME NOT NULL,
   title TEXT NOT NULL,
   source TEXT NOT NULL,
   path TEXT NOT NULL
-);
+) WITHOUT ROWID;
 
 CREATE INDEX EventIndexSource ON Event (source);
 
@@ -344,19 +373,18 @@ Loads some entries in the index database. Entries are validated, and behaviour i
       if not with_oid: fields.remove('oid')
       field_set = set(fields)
       sql = f'INSERT INTO Entry ({",".join(fields)}) VALUES ({",".join(len(fields)*["?"])})'
-      Info = {}
+      Info:Dict[str,dict] = {}
       listing = [entry(row,i) for i,row in enumerate(listing)]
       conn.executemany(sql,listing)
-      conn.commit()
 
 #----------------------------------------------------------------------------------------------------------------------
   def dump(self,path:Union[str,Path]=None,where:str=None,with_oid:bool=False):
     r"""
 Extracts a list of entries from the index database. If *with_oid* is :const:`True` (resp. :const:`False`), the entries will have (resp. not have) an ``oid`` field. Furthermore, the ``attach`` field  has the same form as in :meth:`load`.
 
-:param path: if given, the extracted list is dumped into a json file at *path* and nothing is returned
+:param path: if given, the extracted list is dumped into a json file at *path* and :const:`None` is returned
 :param where: specifies a ``WHERE`` SQL clause (omitting that keyword) to extract the entries (if absent, all the entries are extracted)
-:param with_oid: if :const:`True`, the entries will include the ``oid`` key
+:param with_oid: if :const:`True`, the entries will include their ``oid`` key
     """
 #----------------------------------------------------------------------------------------------------------------------
     def trans(row):
@@ -403,19 +431,19 @@ END'''
 #======================================================================================================================
 class Attach:
   r"""
-An instance of this class manages an attachment folder.
+An instance of this class manages an xpose instance's attachments (field ``attach`` in the index).
   """
 #======================================================================================================================
 
   def __init__(self,root,namer): self.root,self.namer = root,namer
 
 #----------------------------------------------------------------------------------------------------------------------
-  def getpath(self,path:Path):
+  def getpath(self,path:Union[str,Path]):
 #----------------------------------------------------------------------------------------------------------------------
-    path = (self.root/path).resolve()
-    level = len(path.relative_to(self.root).parts)-2
+    path_ = (self.root/path).resolve()
+    level = len(path_.relative_to(self.root).parts)-2
     assert level>=0
-    return path,level
+    return path_,level
 
 #----------------------------------------------------------------------------------------------------------------------
   def ls(self,path:Path):
@@ -478,30 +506,45 @@ An instance of this class manages an attachment folder.
 #======================================================================================================================
 class Cats:
   r"""
-An instance of this class manages access to an xpose instance ``cat``s (categories).
+An instance of this class manages an xpose instance's categories (field ``cat`` in the index).
   """
 #======================================================================================================================
   def __init__(self,root:Path): self.root = root.resolve()
+
   @cached_property
-  def template_loader(self):
-    from genshi.template import TemplateLoader
-    return TemplateLoader(str(self.root/'templates'),auto_reload=True)
-  def load_template(self,tmpl): return self.template_loader.load(tmpl)
-  @cached_property
-  def contents(self):
-    with (self.root/'.visible.json').open() as u: return dict((cat,None) for cat in json.load(u))
+  def contents(self)->Dict[str,Union['Cat',None]]:
+    with open(self.root/'.visible.json') as u: return dict((cat,None) for cat in json.load(u))
   def __iter__(self): yield from self.contents
   def __getitem__(self,cat:str):
     c = self.contents[cat]
     if c is None: self.contents[cat] = c = Cat(cat,self.root)
     return c
 
+  @cached_property
+  def template_loader(self):
+    from genshi.template import TemplateLoader
+    return TemplateLoader(str(self.root/'templates'),auto_reload=True)
+  def load_template(self,tmpl):
+    return self.template_loader.load(tmpl)
+#----------------------------------------------------------------------------------------------------------------------
+  def apply_template(self,tmpl:str,err_tmpl:str,**args):
+    r"""
+Applies a template specified by *tmpl* with a set of variables specified by *args*; on error, applies template *err_tmpl* with no variables.
+
+:param tmpl, err_tmpl: genshi template paths (relative to the root)
+    """
+#----------------------------------------------------------------------------------------------------------------------
+    try: return self.load_template(tmpl+'.xhtml').generate(**args).render('html')
+    except: return self.load_template(err_tmpl+'.xhtml').generate().render('html')
+
 #======================================================================================================================
 class Cat:
   r"""
-An instance of this class manages access to an individual xpose ``cat``.
+An instance of this class manages access to an individual category in xpose (field ``cat`` in the index).
   """
 #======================================================================================================================
+
+  initial:Callable[[XposeBase],None]
 
   def __init__(self,name:str,root:Path):
     self.name,self.root = name,root
@@ -523,24 +566,25 @@ An instance of this class manages access to an individual xpose ``cat``.
 #======================================================================================================================
 
 class HTTPException (Exception):
-  def __init__(self,status:int): self.status = status
-def http_raise(status:int): raise HTTPException(status)
+  def __init__(self,status:HTTPStatus): self.status = status
+def http_raise(status): raise HTTPException(status)
 def http_ts(ts:float): return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
 def parse_input(t:str='application/x-www-form-urlencoded',transf:bool=True):
   assert os.environ['CONTENT_TYPE'].startswith(t)
   n = int(os.environ['CONTENT_LENGTH'])
   x = sys.stdin.read(n)
+  r:Any = x
   if transf:
-    if t == 'application/x-www-form-urlencoded': x = dict(parse_qsl(x))
-    elif t == 'text/json': x = json.loads(x)
-  return x
+    if t == 'application/x-www-form-urlencoded': r = dict(parse_qsl(x))
+    elif t == 'text/json': r = json.loads(x)
+  return r
 
 class str_md(str): pass  # to identify Markdown strings
 @singledispatch
 def rebase(x,base): return urljoin(base,x)
 @rebase.register(str_md)
-def _(x,base,pat=re.compile(r'(\[.*?\])\((.*?)( .*?)?\)')):
+def _(x,base,pat=re.compile(r'(\[.*?])\((.*?)( .*?)?\)')):
   return pat.sub((lambda m: f'{m.group(1)}({urljoin(base,m.group(2))}{m.group(3) or ""})'),x)
 
 #======================================================================================================================
@@ -550,22 +594,22 @@ An instance of this class is a 1-1 mapping between the interval of whole numbers
   """
 #======================================================================================================================
   shift : int # any integer
-  perm : tuple # must be permutation of range(0,20)
+  perm : tuple[int,...] # must be permutation of range(0,20)
   symbols : str # must be of length 32 with all distinct characters
 
-  def __init__(self,shift:int=None,perm:Sequence[int]=None,symbols:str=None,check:bool=False):
+  def __init__(self,shift:int=None,perm:tuple[int,...]=None,symbols:str=None,check:bool=False):
     if check:
       from random import randint, shuffle
       from string import ascii_uppercase, digits
       if shift is None: shift = randint(0,0x100000)
       else: assert isinstance(shift,int)
-      if perm is None: perm = list(range(20)); shuffle(perm)
+      if perm is None: p = list(range(20)); shuffle(p); perm = tuple(p)
       else: assert len(perm)==20 and list(set(perm)) == list(range(20))
       if symbols is None: symbols = (digits+ascii_uppercase)[:32]
       else: assert isinstance(symbols,str) and len(symbols) == 32 and len(set(symbols)) == 32
     self.shift,self.perm,self.symbols = shift,perm,symbols
-    self.perm_ = tuple(perm.index(i) for i in range(20))
-    self.symbol_ = dict((c,f'{i:05b}') for i,c in enumerate(symbols))
+    self.perm_ = tuple(self.perm.index(i) for i in range(20))
+    self.symbol_ = dict((c,f'{i:05b}') for i,c in enumerate(self.symbols))
 
 #----------------------------------------------------------------------------------------------------------------------
   def int2str(self,n:int)->str:

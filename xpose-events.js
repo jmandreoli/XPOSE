@@ -8,7 +8,7 @@ class XposeCalendar {
 
   constructor (el,cal,xpose) {
     // el: element in the page
-    // cal: argument to FullCalendar.Calendar; can only specify sources (if any) through eventSources
+    // cal: argument to FullCalendar.Calendar; all sources (if any) should be specified in eventSources
     // xpose: object with fields id,url,sources
     el.innerHTML = ''
 
@@ -34,8 +34,8 @@ class XposeCalendar {
     navigation.style.fontSize = 'x-small'
     navigation.type = 'date'
     navigation.addEventListener('blur',()=>{navigation.value=''},false)
-    navigation.addEventListener('focus',()=>{navigation.value=moment(calendar.view.currentStart).format('YYYY-MM-DD')},false)
-    navigation.addEventListener('change',()=>{if(navigation.checkValidity()&&navigation.value){calendar.gotoDate(navigation.value)}},false)
+    navigation.addEventListener('focus',()=>{navigation.value=moment(this.calendar.view.currentStart).format('YYYY-MM-DD')},false)
+    navigation.addEventListener('change',()=>{if(navigation.checkValidity()&&navigation.value){this.calendar.gotoDate(navigation.value)}},false)
 
     header.insertCell().innerHTML = '<span> Sources: </span>'
     var sources = []
@@ -72,7 +72,8 @@ class XposeCalendar {
       this.transformMath = (a) => {if(a.length)window.MathJax.typeset(a)}
     }
     this.currentYears = null
-    return new FullCalendar.Calendar(this.el_calendar,cal)
+    this.calendar = new FullCalendar.Calendar(this.el_calendar,cal)
+    return this.calendar
   }
 
   events (info,success,failure) {
@@ -88,7 +89,7 @@ class XposeCalendar {
       WHERE entry=Entry.oid AND start BETWEEN '${start}-01-01' AND '${end}-12-31' AND source IN (${this.sources}) ORDER BY start DESC
     `
     jQuery.ajax({
-      url:this.url,data:{sql:sql},
+      url:this.url,data:{sql:sql},cache:false,
       success:(data)=>{success(this.process(data));this.currentYears=years},
       error:(jqxhr,textStatus,errorThrown)=>{failure(errorThrown);this.el_details.innerHTML=`<pre>Error ${errorThrown}\n${jqxhr.responseText}</pre>`}
     }).always(()=>this.el_calendar.style.pointerEvents='auto')
