@@ -16,24 +16,24 @@ An Xpose instance is a directory (root) containing at least the following member
 * ``cats``: the category folder holding all the information related to the ``cat`` field in the index
 * ``cats/.visible.json``: the list of active categories
 * ``cats/jschemas``: `json schemas <https://json-schema.org/>`_, one for each category
-* ``cats/templates``: `genshi templates <https://genshi.edgewall.org/>`_, one for each template type and each category
 * ``cats/utils``: python files, one for each category, defining attributes of the :class:`Cat` instances
+* ``cats/templates`` (optional): `genshi templates <https://genshi.edgewall.org/>`_, one for each template type and each category
 
 The index database has the following tables:
 
 #. Table ``Entry`` with fields
 
-   * ``oid``: entry key as an :class:`int` (primary key of the database, auto-incremented)
+   * ``oid``: entry key as an :class:`int` (primary key, auto-incremented)
    * ``version``: version of the entry as an :class:`int` (always incremented on update)
-   * ``cat``: category as a relative path (with no suffix) in the ``cats/utils`` and ``cats/jschemas`` folders
-   * ``value``: actual JSON encoded data, conforming to the JSON schema of the category held by ``cat``
+   * ``cat``: category as a relative path (with no suffix) in the ``cats/{utils,jschemas}`` folders
+   * ``value``: JSON encoded data, conforming to the JSON schema of the category held by ``cat``
    * ``attach``: relative path in the ``attach`` folder holding the attachments of this entry
    * ``created``: creation timestamp in ISO format YYYY-MM-DD[T]HH:MM:SS
    * ``modified``: last modification timestamp in same format as ``created``
 
 #. Table ``Short`` with fields
 
-   * ``entry``: reference to an ``Entry`` row
+   * ``entry``: reference to an ``Entry`` row (primary key, foreign reference)
    * ``value``: short name for the entry (plain text)
 """
 
@@ -71,7 +71,7 @@ CREATE TABLE Short (
 #======================================================================================================================
 class XposeBase:
   """
-An instances of this base class ia a resource for processing Xpose operations. Actual behaviour is defined in subclasses.
+An instances of this base class is a resource for processing Xpose operations. Actual behaviour is defined in subclasses.
   """
 #======================================================================================================================
 
@@ -79,7 +79,7 @@ An instances of this base class ia a resource for processing Xpose operations. A
   index_db: Path
   r"""Path to the index database"""
   root: Path
-  r"""Path to the root"""
+  r"""Path to the root folder"""
   attach: 'Attach'
   r"""Object managing the attachments associated to this instance"""
   cats: 'Cats'
@@ -96,13 +96,13 @@ An instances of this base class ia a resource for processing Xpose operations. A
     r"""
 Returns a :class:`sqlite3.Connection` opened on the index database. The keyword arguments *ka* are passed as such to the connection constructor. Two user defined sqlite functions are made available:
 
-* :func:`oid_encoder` (arity 2): passed the current ``oid`` and ``attach`` fields from the database, it returns the oid encoding to set to the ``attach`` field.
+* :func:`oid_encoder` (arity 2): returns the oid encoding to set to the ``attach`` field, given an entry ``oid`` and ``attach`` fields from the database (the latter is overridden)
 * :func:`apply_template` (arity 3): invokes method :meth:`apply_template` on the object held by the :attr:`cats` attribute; variable ``xpose`` denotes this instance
     """
 #----------------------------------------------------------------------------------------------------------------------
     conn = sqlite3.connect(self.index_db,**ka)
     conn.create_function('oid_encoder',2,(lambda oid,attach,c=self.attach.namer.int2str:c(oid)))
-    conn.create_function('xpose_template',3,(lambda tmpl,args,err_tmpl,t=self.cats.apply_template:t(tmpl,err_tmpl,xpose=self,**json.loads(args))))
+    conn.create_function('xpose_template',3,(lambda tmpl,err_tmpl,args,t=self.cats.apply_template:t(tmpl,err_tmpl,xpose=self,**json.loads(args))))
     return conn
 
   @cached_property
@@ -154,19 +154,22 @@ Input is expected as an (encoded) form with a single field. The field must be ei
 * ``oid``: value must denote the key of a unique entry. Output is the corresponding JSON formatted entry, as a dictionary.
     """
 #----------------------------------------------------------------------------------------------------------------------
+    def select_all(*a,**ka):
+      with self.connect(**ka) as conn:
+        conn.row_factory = sqlite3.Row
+        return [dict(r) for r in conn.execute(*a).fetchall()]
     form = dict(parse_qsl(os.environ['QUERY_STRING']))
-    with self.connect() as conn:
-      conn.row_factory = sqlite3.Row
-      if (sql:=form.get('sql')) is not None:
-        sql = sql.strip()
-        assert sql.lower().startswith('select ')
-        resp = json.dumps([dict(r) for r in conn.execute(sql).fetchall()])
-      elif (oid:=form.get('oid')) is not None:
-        oid = int(oid)
-        r = dict(conn.execute(self.sql_oid,(oid,)).fetchone())
-        r['short'] = r['short'].replace('"',r'\"')
-        resp = '{{"oid":{oid},"version":{version},"cat":"{cat}","short":"{short}","value":{value},"attach":"{attach}"}}'.format(**r)
-      else: http_raise(HTTPStatus.NOT_FOUND)
+    resp = ''
+    if (sql:=form.get('sql')) is not None:
+      sql = sql.strip()
+      assert sql.lower().startswith('select ')
+      resp = json.dumps(select_all(sql))
+    elif (oid:=form.get('oid')) is not None:
+      oid = int(oid)
+      r, = select_all(self.sql_oid,(oid,))
+      r['short'] = r['short'].replace('"',r'\"')
+      resp = '{{"oid":{oid},"version":{version},"cat":"{cat}","short":"{short}","value":{value},"attach":"{attach}"}}'.format(**r)
+    else: http_raise(HTTPStatus.NOT_FOUND)
     return resp, {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -187,16 +190,16 @@ Input is expected as an (encoded) form with a single field ``sql``, which must d
 Input is expected as any JSON encoded entry. Validation is not performed.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    entry = parse_input('text/json')
+    entry = parse_input('application/json')
     oid,version,value = entry.get('oid'),entry.get('version'),json.dumps(entry['value'])
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if oid is None:
+      version=0
+      sql = 'INSERT INTO Entry (version,cat,value,created,modified) VALUES (?,?,?,?,?)',(version+1,entry['cat'],value,now,now)
+    else:
+      version = int(version)
+      sql = 'UPDATE Entry SET version=iif(version=?,?,NULL),value=?,modified=? WHERE oid=?',(version,version+1,value,now,int(oid))
     with self.connect() as conn:
-      if oid is None:
-        version=0
-        sql = 'INSERT INTO Entry (version,cat,value,created,modified) VALUES (?,?,?,?,?)',(version+1,entry['cat'],value,now,now)
-      else:
-        version = int(version)
-        sql = 'UPDATE Entry SET version=iif(version=?,?,NULL),value=?,modified=? WHERE oid=?',(version,version+1,value,now,int(oid))
       try: res = conn.execute(*sql)
       except sqlite3.IntegrityError: http_raise(HTTPStatus.CONFLICT)
       if oid is None: oid = res.lastrowid
@@ -209,8 +212,7 @@ Input is expected as any JSON encoded entry. Validation is not performed.
 Input is expected as an (encoded) form with a single field ``oid``, which must denote the primary key of an Entry.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    form = parse_input()
-    oid = int(form['oid'])
+    oid = parse_input('application/json')['oid']
     with self.connect() as conn:
       conn.execute('PRAGMA foreign_keys = ON')
       conn.execute('DELETE FROM Entry WHERE oid=?',(oid,))
@@ -221,7 +223,7 @@ Input is expected as an (encoded) form with a single field ``oid``, which must d
 #----------------------------------------------------------------------------------------------------------------------
   def do_head(self):
 #----------------------------------------------------------------------------------------------------------------------
-    return 'héllo world', {'Content-Type':'text/plain; charset=UTF-8'}
+    http_raise(HTTPStatus.NOT_IMPLEMENTED)
 
 #======================================================================================================================
 class XposeAttach (XposeBase,CGIMixin):
@@ -247,12 +249,12 @@ Input is expected as an (encoded) form with a single field ``path``.
     return json.dumps({'content':content,'version':self.version(path),'toplevel':level==0}),{'Content-Type':'text/json'}
 
 #----------------------------------------------------------------------------------------------------------------------
-  def do_put(self):
+  def do_patch(self):
     """
 Input is expected as a JSON encoded list of pairs of paths.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    content = parse_input('text/json')
+    content = parse_input('application/json')
     path,version,ops = content['path'],content['version'],content['ops']
     with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations
       path,level = self.attach.getpath(path)
@@ -333,7 +335,7 @@ Checks minimal configuration of the Xpose folder. If the index database is prese
     r"""
 Loads some entries in the index database. Entries are validated, and behaviour is transactional. If *with_oid* is :const:`True` (resp. :const:`False`), the entries must have (resp. not have) an ``oid`` field. If present, the ``oid`` field must of course be different from any existing one (an error is raised otherwise). Furthermore, the ``attach`` field must be either :const:`None` or a dictionary where each key is a local path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that hard-linking requires the target file to exist and be writable (hard-linking increases the number of hard links of a file). Note that folders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
 
-:param content: the list of entries to load into the index database, or a path to a json file containing that list under key ``listing``
+:param content: the list of entries to load into the index database, or a path to a json file containing that list under key ``listing`` (consistent with method :meth:`dump`)
 :param with_oid: whether the entries contain their ``oid`` key
     """
 #----------------------------------------------------------------------------------------------------------------------
@@ -382,7 +384,7 @@ Loads some entries in the index database. Entries are validated, and behaviour i
     r"""
 Extracts a list of entries from the index database. If *with_oid* is :const:`True` (resp. :const:`False`), the entries will have (resp. not have) an ``oid`` field. Furthermore, the ``attach`` field  has the same form as in :meth:`load`.
 
-:param path: if given, the extracted list is dumped into a json file at *path* and :const:`None` is returned
+:param path: if not :const:`None`, the extracted list is dumped into a json file at *path* (under key ``listing``) and :const:`None` is returned
 :param where: specifies a ``WHERE`` SQL clause (omitting that keyword) to extract the entries (if absent, all the entries are extracted)
 :param with_oid: if :const:`True`, the entries will include their ``oid`` key
     """
@@ -506,7 +508,7 @@ An instance of this class manages an xpose instance's attachments (field ``attac
 #======================================================================================================================
 class Cats:
   r"""
-An instance of this class manages an xpose instance's categories (field ``cat`` in the index).
+An instance of this class manages all the xpose instance's categories (field ``cat`` in the index).
   """
 #======================================================================================================================
   def __init__(self,root:Path): self.root = root.resolve()
@@ -529,9 +531,10 @@ An instance of this class manages an xpose instance's categories (field ``cat`` 
 #----------------------------------------------------------------------------------------------------------------------
   def apply_template(self,tmpl:str,err_tmpl:str,**args):
     r"""
-Applies a template specified by *tmpl* with a set of variables specified by *args*; on error, applies template *err_tmpl* with no variables.
+Applies a template specified by *tmpl* with a set of variables specified by *args*. All templates are found in folder ``templates`` with relative path specifying the template role and category, and suffix ``.xhtml``.
 
-:param tmpl, err_tmpl: genshi template paths (relative to the root)
+:param tmpl: genshi template path (relative to the root)
+:param err_tmpl: genshi template path, executed, with no variable, in case of error
     """
 #----------------------------------------------------------------------------------------------------------------------
     try: return self.load_template(tmpl+'.xhtml').generate(**args).render('html')
@@ -540,7 +543,13 @@ Applies a template specified by *tmpl* with a set of variables specified by *arg
 #======================================================================================================================
 class Cat:
   r"""
-An instance of this class manages access to an individual category in xpose (field ``cat`` in the index).
+An instance of this class manages an individual category in xpose (field ``cat`` in the index). Two pieces of information (at least) are attached to a category *name*:
+
+* The JSON schema associated to the category, found in folder ``jschemas`` with relative path *name* and suffix ``.json``. It defines the accepted type of JSON objects (``value`` field in the index database)
+* The server-specific behaviour of the category, found in folder ``utils`` with relative path *name* and suffix ``.py``. It defines methods of the category, and in particular a method :meth:`initial` invoked to create database schemas associated to the category. It should at least define a trigger to populate table ``Short``, otherwise th objects of that category will not be seen in the global index listing.
+
+:param name: name of the category
+:param root: root path
   """
 #======================================================================================================================
 
@@ -555,6 +564,7 @@ An instance of this class manages access to an individual category in xpose (fie
 
   @cached_property
   def validator(self):
+    r"""Returns the validator of the json schema"""
     from jsonschema import Draft202012Validator,RefResolver
     p = self.root/'jschemas'/self.name
     with p.with_suffix('.json').open() as u: schema = json.load(u)
@@ -562,40 +572,25 @@ An instance of this class manages access to an individual category in xpose (fie
     return Draft202012Validator(schema=schema).evolve(resolver=RefResolver(f'file://{self.root}/jschemas/_',{}))
 
 #======================================================================================================================
-# Utilities
-#======================================================================================================================
-
-class HTTPException (Exception):
-  def __init__(self,status:HTTPStatus): self.status = status
-def http_raise(status): raise HTTPException(status)
-def http_ts(ts:float): return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
-
-def parse_input(t:str='application/x-www-form-urlencoded',transf:bool=True):
-  assert os.environ['CONTENT_TYPE'].startswith(t)
-  n = int(os.environ['CONTENT_LENGTH'])
-  x = sys.stdin.read(n)
-  r:Any = x
-  if transf:
-    if t == 'application/x-www-form-urlencoded': r = dict(parse_qsl(x))
-    elif t == 'text/json': r = json.loads(x)
-  return r
-
-class str_md(str): pass  # to identify Markdown strings
-@singledispatch
-def rebase(x,base): return urljoin(base,x)
-@rebase.register(str_md)
-def _(x,base,pat=re.compile(r'(\[.*?])\((.*?)( .*?)?\)')):
-  return pat.sub((lambda m: f'{m.group(1)}({urljoin(base,m.group(2))}{m.group(3) or ""})'),x)
-
-#======================================================================================================================
 class IntStrConverter:
   r"""
-An instance of this class is a 1-1 mapping between the interval of whole numbers from 0 (inclusive) to 0x100000 (exclusive) and a set of strings of the form \*\*/\*\* (each \* being an alphanumeric character). Suitable for defining attachment paths.
+An instance of this class is a 1-1 mapping between the interval of whole numbers from 0 (inclusive) to 0x100000 (exclusive) and a set of strings of the form \*\*/\*\* (each \* being a character in *symbols*). Suitable for defining attachment paths. Example::
+
+   c = IntStrConverter(check=True) # all parameters are initialised randomly
+   L = list(range(0x100000))
+   assert [c.str2int(s) for s in [c.int2str(n) for n in L]] == L
+
+:param shift: any integer
+:param perm: a permutation of (0,...,19)
+:param symbols: a string of length 32 where each character occurs only once
+:param check: if :const:`True`, checks the value of each of the other parameters, and, when missing, generates some valid random value
   """
 #======================================================================================================================
-  shift : int # any integer
-  perm : tuple[int,...] # must be permutation of range(0,20)
-  symbols : str # must be of length 32 with all distinct characters
+  shift : int
+  perm : tuple[int,...]
+  symbols : dict[str,str]
+  perm_: tuple[int,...] # inverse of perm
+  symbols_: dict[str,str] # inverse of symbols
 
   def __init__(self,shift:int=None,perm:tuple[int,...]=None,symbols:str=None,check:bool=False):
     if check:
@@ -607,28 +602,58 @@ An instance of this class is a 1-1 mapping between the interval of whole numbers
       else: assert len(perm)==20 and list(set(perm)) == list(range(20))
       if symbols is None: symbols = (digits+ascii_uppercase)[:32]
       else: assert isinstance(symbols,str) and len(symbols) == 32 and len(set(symbols)) == 32
-    self.shift,self.perm,self.symbols = shift,perm,symbols
+    self.shift,self.perm = shift,perm
     self.perm_ = tuple(self.perm.index(i) for i in range(20))
-    self.symbol_ = dict((c,f'{i:05b}') for i,c in enumerate(self.symbols))
+    bs = [f'{i:05b}' for i in range(32)]
+    self.symbols = dict(zip(bs,symbols))
+    self.symbols_ = dict(zip(symbols,bs))
 
 #----------------------------------------------------------------------------------------------------------------------
   def int2str(self,n:int)->str:
+    r""":param n: value to convert"""
 #----------------------------------------------------------------------------------------------------------------------
-    #assert n < 0x100000
-    n = (n+self.shift)%0x100000 # shift
-    x = f'{n:020b}' # int -> 20-bit (0/1) str
-    x = ''.join(x[i] for i in self.perm) # permute the bits
-    x = ''.join(self.symbols[int(x[i:i+5],2)] for i in range(0,20,5)) # segment symbols
-    return f'{x[:2]}/{x[2:]}'
+    #assert isinstance(n,int) and 0 <= n < 0x100000
+    n = (n+self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
+    x = f'{n:020b}' # convert: 20-bit-int -> 20-bit-str
+    x = ''.join(x[i] for i in self.perm) # permute: 20-bit-str -> 20-bit-str
+    x = ''.join(self.symbols[x[i:i+5]] for i in range(0,20,5)) # segment: 20-bit-str -> 4-symbol-str
+    return f'{x[:2]}/{x[-2:]}'
 
 #----------------------------------------------------------------------------------------------------------------------
   def str2int(self,x:str)->int:
+    r""":param x: value to convert"""
 #----------------------------------------------------------------------------------------------------------------------
-    #assert len(x)==5 and x[2] == '/'
-    x = ''.join(self.symbol_[u] for t in x.split('/',2) for u in t) # unsegment symbols
-    x = ''.join(x[i] for i in self.perm_) # permute back the bits
-    n = int(x,2) # 20-bit (0/1) str -> int
-    return (n-self.shift)%0x100000 # unshift
+    #assert isinstance(x,str) and len(x)==5 and x[2] == '/' and all(u in self.symbols_ for t in (x[:2],x[-2:]) for u in t)
+    x = ''.join(self.symbols_[u] for t in (x[:2],x[-2:]) for u in t) # segment: 4-symbol-str -> 20-bit-str
+    x = ''.join(x[i] for i in self.perm_) # permute: 20-bit-str -> 20-bit-str
+    n = int(x,2) # convert: 20-bit-str -> 20-bit-int
+    return (n-self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
+
+#======================================================================================================================
+# Utilities
+#======================================================================================================================
+
+class HTTPException (Exception):
+  def __init__(self,status:HTTPStatus): self.status = status
+def http_raise(status): raise HTTPException(status)
+def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
+
+def parse_input(t:str='application/x-www-form-urlencoded',transf:bool=True):
+  assert os.environ['CONTENT_TYPE'].startswith(t)
+  n = int(os.environ['CONTENT_LENGTH'])
+  x = sys.stdin.read(n)
+  r:Any = x
+  if transf:
+    if t == 'application/x-www-form-urlencoded': r = dict(parse_qsl(x))
+    elif t == 'application/json': r = json.loads(x)
+  return r
+
+class str_md(str): pass  # to identify Markdown strings
+@singledispatch
+def rebase(x,base): return urljoin(base,x)
+@rebase.register(str_md)
+def _(x,base,pat=re.compile(r'(\[.*?])\((.*?)( .*?)?\)')):
+  return pat.sub((lambda m: f'{m.group(1)}({urljoin(base,m.group(2))}{m.group(3) or ""})'),x)
 
 # Beware: if you change this line, all the oid encodings obtained using the default encoder will be fucked up
 XposeBase.attach_namer = IntStrConverter(shift=0xe1e06,perm=(17,12,9,6,11,14,0,4,19,8,1,18,3,7,5,16,10,2,15,13),symbols='0123456789ABCDEFGHIJKLMNOPQRSTUV')
