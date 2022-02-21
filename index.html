@@ -46,8 +46,8 @@ Listing view
           <button type="button" title="Create a new entry">
             <span class="ui-icon ui-icon-plusthick"></span>
           </button>
-          <table id="listing-new" style="display:none; background-color:ivory; position:absolute; z-index:1;">
-          </table>
+          <span id="listing-new" style="display:none; background-color:ivory; position:absolute; z-index:1;">
+          </span>
         </span>
         <button type="button" title="Toggle query editor" onclick="toggle_display(document.getElementById('listing-editor'))">
           <span class="ui-icon ui-icon-help"></span>
@@ -101,7 +101,7 @@ Attachment view
           <button type="button" title="Upload a new attachment" onclick="document.getElementById('attach-upload').click()">
             <span class="ui-icon ui-icon-plusthick"></span>
           </button>
-          <input type="file" id="attach-upload" onchange="xpose.current.upload(this.files)" style="display:none;">
+          <input type="file" id="attach-upload" multiple onchange="xpose.current.upload(this.files)" style="display:none;">
         </span>
         <button type="button" id="attach-save" title="Save attachment" onclick="xpose.current.save()">
           <span class="ui-icon ui-icon-arrowthickstop-1-n"></span>

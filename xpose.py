@@ -175,7 +175,7 @@ Input is expected as an (encoded) form with a single field. The field must be ei
 #----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
     """
-Input is expected as an (encoded) form with a single field ``sql``, which must denote an arbitrary SQLite script.
+Input is expected as a JSON encoded object with a single field ``sql``, which must denote an arbitrary SQLite script.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = parse_input()
@@ -190,7 +190,7 @@ Input is expected as an (encoded) form with a single field ``sql``, which must d
 Input is expected as any JSON encoded entry. Validation is not performed.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    entry = parse_input('application/json')
+    entry = parse_input()
     oid,version,value = entry.get('oid'),entry.get('version'),json.dumps(entry['value'])
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if oid is None:
@@ -209,10 +209,10 @@ Input is expected as any JSON encoded entry. Validation is not performed.
 #----------------------------------------------------------------------------------------------------------------------
   def do_delete(self):
     """
-Input is expected as an (encoded) form with a single field ``oid``, which must denote the primary key of an Entry.
+Input is expected as a JSON encoded object with a single field ``oid``, which must denote the primary key of an Entry.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    oid = parse_input('application/json')['oid']
+    oid = parse_input()['oid']
     with self.connect() as conn:
       conn.execute('PRAGMA foreign_keys = ON')
       conn.execute('DELETE FROM Entry WHERE oid=?',(oid,))
@@ -251,12 +251,12 @@ Input is expected as an (encoded) form with a single field ``path``.
 #----------------------------------------------------------------------------------------------------------------------
   def do_patch(self):
     """
-Input is expected as a JSON encoded list of pairs of paths.
+Input is expected as a JSON encoded object with fields ``path``, ``version`` and ``ops``, the latter being a list of operations. An operation is specified as an object with fields ``src``, ``trg`` (relative paths) and ``is_new`` (boolean).
     """
 #----------------------------------------------------------------------------------------------------------------------
-    content = parse_input('application/json')
+    content = parse_input()
     path,version,ops = content['path'],content['version'],content['ops']
-    with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations
+    with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations, no transaction is performed
       path,level = self.attach.getpath(path)
       if self.version(path) != version: http_raise(HTTPStatus.CONFLICT)
       errors = [err for op in ops if (err:=self.attach.do(path,op['src'].strip(),op['trg'].strip(),bool(op['is_new']))) is not None]
@@ -495,11 +495,10 @@ An instance of this class manages an xpose instance's attachments (field ``attac
       f = Path(v.name)
       try:
         while size>0:
-          m = n = min(size,chunk)
-          while m>0:
-            t = buf.read(m); m_ = len(t)
-            if m_==0: raise EOFError()
-            v.write(t); m -= m_
+          t = buf.read(min(size,chunk))
+          n = len(t)
+          if n==0: raise EOFError()
+          v.write(t)
           size -= n
       except: f.unlink(); raise
     s = f.stat()
@@ -638,14 +637,19 @@ class HTTPException (Exception):
 def http_raise(status): raise HTTPException(status)
 def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
-def parse_input(t:str='application/x-www-form-urlencoded',transf:bool=True):
-  assert os.environ['CONTENT_TYPE'].startswith(t)
+def parse_input(mime:str='application/json',transf:bool=True):
+  assert os.environ['CONTENT_TYPE'].startswith(mime)
   n = int(os.environ['CONTENT_LENGTH'])
-  x = sys.stdin.read(n)
-  r:Any = x
+  x = []
+  while n>0:
+    t = sys.stdin.buffer.read(n); m = len(t)
+    if m==0: raise EOFError()
+    x.append(t)
+    n -= m
+  r:Any = b''.join(x).decode() # default (utf-8) encoding used; should be parsed from parameters in CONTENT_TYPE header
   if transf:
-    if t == 'application/x-www-form-urlencoded': r = dict(parse_qsl(x))
-    elif t == 'application/json': r = json.loads(x)
+    if mime == 'application/json': r = json.loads(r)
+    elif mime == 'application/x-www-form-urlencoded': r = dict(parse_qsl(r)) # very basic, no multiple values with same field
   return r
 
 class str_md(str): pass  # to identify Markdown strings

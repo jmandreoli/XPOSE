@@ -12,12 +12,12 @@ class XposeCalendar {
     // xpose: object with fields id,url,sources
     el.innerHTML = ''
 
-    var table = document.createElement('table')
+    const table = document.createElement('table')
     el.appendChild(table)
-    var header = table.insertRow()
+    const header = table.insertRow()
     header.style.fontSize = 'x-small'
 
-    var evSource = {id:xpose.id,events:(x,success,failure)=>{return this.events(x,success,failure)}}
+    const evSource = {id:xpose.id,events:(x,success,failure)=>{return this.events(x,success,failure)}}
     if (cal.eventSources) {cal.eventSources.push(evSource)}
     else {cal.eventSources = [evSource]}
     this.el_calendar = document.createElement('div')
@@ -29,7 +29,7 @@ class XposeCalendar {
     el.appendChild(this.el_details)
 
     header.insertCell().innerHTML = '<span>Jump to: </span>'
-    var navigation = document.createElement('input')
+    const navigation = document.createElement('input')
     header.insertCell().appendChild(navigation)
     navigation.style.fontSize = 'x-small'
     navigation.type = 'date'
@@ -38,12 +38,12 @@ class XposeCalendar {
     navigation.addEventListener('change',()=>{if(navigation.checkValidity()&&navigation.value){this.calendar.gotoDate(navigation.value)}},false)
 
     header.insertCell().innerHTML = '<span> Sources: </span>'
-    var sources = []
+    const sources = []
     this.sourceMap = {}
     for (const src of xpose.sources) {
       sources.push(`'${src.id}'`)
       this.sourceMap[src.id] = src
-      var td = header.insertCell(); td.innerHTML = src.id
+      const td = header.insertCell(); td.innerHTML = src.id
       td.style.backgroundColor = src.options.backgroundColor||'black'
       td.style.color = src.options.textColor||'white'
     }
@@ -52,17 +52,17 @@ class XposeCalendar {
     header.insertCell().innerHTML = xpose.header||''
 
     this.url = xpose.url
-    var sql = `SELECT min(start) as low,max(start) as high FROM Event WHERE source IN (${this.sources})`
+    const sql = `SELECT min(start) as low,max(start) as high FROM Event WHERE source IN (${this.sources})`
     axios({url:`${this.url}?sql=${encodeURIComponent(sql)}`,headers:{'Cache-Control':'no-store'}}).then((resp)=>{
-      var data = resp.data[0]
-      var low = new Date(data.low); low.setMonth(0); low.setDate(1)
-      var high = new Date(data.high); high.setFullYear(high.getFullYear()+1); high.setMonth(11); high.setDate(31)
+      const data = resp.data[0]
+      const low = new Date(data.low); low.setMonth(0); low.setDate(1)
+      const high = new Date(data.high); high.setFullYear(high.getFullYear()+1); high.setMonth(11); high.setDate(31)
       navigation.min = low.toISOString().substring(0,10)
       navigation.max = high.toISOString().substring(0,10)
       navigation.insertAdjacentHTML('afterend',`<span> (since ${low.getFullYear()})</span>`)
     })
     if (window.Showdown) {
-      var conv = new showdown.Converter(window.Showdown)
+      const conv = new showdown.Converter(window.Showdown)
       this.transformMarkdown = (a) => {for(const el of a){el.innerHTML = conv.makeHtml(el.innerHTML)}}
     }
     if (window.MathJax) {
@@ -74,14 +74,14 @@ class XposeCalendar {
   }
 
   events (info,success,failure) {
-    var start = new Date(info.start);start=start.getFullYear()
-    var end = new Date(info.end);end.setSeconds(end.getSeconds()-1);end=end.getFullYear()
-    var years = `${start}-${end}`
+    const start = new Date(info.start).getFullYear()
+    const end_ = new Date(info.end);end_.setSeconds(end_.getSeconds()-1);const end = end_.getFullYear()
+    const years = `${start}-${end}`
     if (this.currentYears==years||this.currentYears=='') {return}
     this.el_calendar.style.pointerEvents='none' // avoids bursts of updates, restored after ajax
     this.currentYears = ''
     console.log('Loading',years)
-    var sql = `SELECT entry as oid,start,end,title,source,
+    const sql = `SELECT entry as oid,start,end,title,source,
       xpose_template('events/'||Entry.cat,'events/error','{"value":'||Entry.value||',"attach":"'||Entry.attach||'"}') as details FROM Event,Entry
       WHERE entry=Entry.oid AND start BETWEEN '${start}-01-01' AND '${end}-12-31' AND source IN (${this.sources}) ORDER BY start DESC
     `
@@ -93,25 +93,25 @@ class XposeCalendar {
 
   process (data) {
     this.el_details.innerHTML = ''
-    var events = data.map((row)=>this.process_row(row))
+    const events = data.map((row)=>this.process_row(row))
     if (this.transformMarkdown) { this.transformMarkdown(Array.from(this.el_details.getElementsByClassName('transform-markdown'))) }
     if (this.transformMath) { this.transformMath(Array.from(this.el_details.getElementsByClassName('transform-math'))) }
     return events
   }
 
   process_row (row) {
-    var ev = {id:`EV-${row.oid}`,start:row.start,end:row.end,title:row.title,extendedProps:{source:row.source}}
+    const ev = {id:`EV-${row.oid}`,start:row.start,end:row.end,title:row.title,extendedProps:{source:row.source}}
     this.el_details.insertAdjacentHTML('beforeend',row.details)
-    var tbody = this.el_details.lastElementChild
+    const tbody = this.el_details.lastElementChild
     tbody.id = ev.id
-    var td = tbody.insertRow(0).insertCell()
+    const td = tbody.insertRow(0).insertCell()
     td.colSpan = 2; td.className = 'setting'
-    var options = this.sourceMap[row.source].options
+    const options = this.sourceMap[row.source].options
     for (const o in options) { ev[o] = options[o] }
     td.style.backgroundColor = options.backgroundColor||'black'
     td.style.color = options.textColor||'white'
-    var extra = tbody.dataset.left||''
-    var status = tbody.dataset.right||''
+    const extra = tbody.dataset.left||''
+    let status = tbody.dataset.right||''
     if (status) {status = `<div class="status">${status}</div>`}
     td.innerHTML = `${this.formatSpan(row.start,row.end)} ${extra} ${status}`
     return ev

@@ -1,8 +1,8 @@
 h1 { background-color: black; color: white; }
 #listing td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
 #listing td:hover { background-color: lavender; }
-#listing-new td { border: thin solid blue; padding: 3px; font-weight: bold; }
-#listing-new td:hover { background-color: blue; color: white; }
+#listing-new span { display: table-row; border: thin solid blue; padding: 3px; font-weight: bold; }
+#listing-new span:hover { background-color: blue; color: white; }
 #attach td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
 #xpose-progress div { border: thin solid red; }
 div.console { border: thin solid red; background-color: linen; }

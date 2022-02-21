@@ -23,7 +23,7 @@ class Xpose {
   }
   addView (name,view) {
     view.error = (label,x) => this.error(`${name}:${label}`,x)
-    view.ajaxError = (j,t,e) => this.ajaxError(j,t,e)
+    view.ajaxError = (err) => this.ajaxError(err)
     view.progressor = (label) => this.progressor(`${name}:${label}`)
     view.set_dirty = (flag) => { this.dirty = flag; view.show_dirty(flag); }
     view.get_dirty = () => { return this.dirty }
@@ -44,18 +44,27 @@ class Xpose {
   }
 
   progressor (label) {
-    var div = document.createElement('div')
+    // displays a progress bar and returns an object with the following fields:
+    //   update: an update callback to pass to the target task (argument: percent_complete)
+    //   close: a close callback (no argument)
+    const div = document.createElement('div')
     div.innerHTML = `<progress max="1." value="0."></progress><button type="button"><span class="ui-icon ui-icon-closethick"></span></button> <strong>${label}</strong>`
-    var el = div.firstElementChild
-    var cancelled = false
+    const el = div.firstElementChild
+    let cancelled = false
     el.nextElementSibling.addEventListener('click',()=>{cancelled=true},false)
     this.el_progress.appendChild(div)
     return {
-      update:(percent)=>{el.value=percent.toFixed(3);if(cancelled){this.el_progress.removeChild(div)};return cancelled},
+      update:(percent)=>{el.value=percent.toFixed(3);return cancelled},
       close:()=>{this.el_progress.removeChild(div)}
     }
   }
-  ajaxError (jqxhr,textStatus,errorThrown) { this.error('ajax',`${errorThrown}\n${jqxhr.responseText}`) }
+  ajaxError (err) {
+    let errText = null
+    if (err.response) { errText = `Server error ${err.response.status} ${err.response.statusText}\n${err.response.data}` }
+    else if (err.request) { errText = `No response received from Server\n${err.request}` }
+    else { errText = err.message}
+    this.error('ajax',errText)
+  }
   error (label,x) { this.views.console.display(this.current,`ERROR: ${label}\n${x===null?'':x}`) }
 }
 
@@ -71,7 +80,7 @@ class listingView {
     this.el_new = document.getElementById('listing-new')
     this.el_editor = document.getElementById('listing-editor')
     this.el_count = document.getElementById('listing-count')
-    var query = `SELECT oid,Short.value as short
+    const query = `SELECT oid,Short.value as short
 FROM Entry LEFT JOIN Short ON Short.entry=oid
 -- WHERE created LIKE '2013-%'
 ORDER BY created DESC
@@ -89,7 +98,7 @@ LIMIT 30`
   }
 
   display () {
-    if (this.el_new.rows.length==0) {
+    if (this.el_new.children.length==0) {
       axios({url:this.url.cats,headers:{'Cache-Control':'no-store'}}).
         then((resp)=>{this.setupNew(resp.data)}).
         catch(this.ajaxError)
@@ -106,7 +115,7 @@ LIMIT 30`
     this.el_count.innerHTML = String(data.length)
     this.el_main.innerHTML = ''
     for (const entry of data) {
-      var tr = this.el_main.insertRow()
+      const tr = this.el_main.insertRow()
       tr.addEventListener('click',()=>{this.go_entry_old(entry.oid)},false)
       tr.insertCell().innerHTML = entry.short
     }
@@ -116,9 +125,10 @@ LIMIT 30`
 
   setupNew (cats) {
     for (const cat of cats) {
-      var td = this.el_new.insertRow().insertCell()
-      td.innerHTML = cat
-      td.addEventListener('click',(e)=>{this.go_entry_new(cat)},false)
+      const span = document.createElement('span')
+      span.innerHTML = cat
+      span.addEventListener('click',(e)=>{this.go_entry_new(cat)},false)
+      this.el_new.appendChild(span)
     }
   }
 
@@ -181,7 +191,7 @@ class entryView {
 
   save () {
     if (!this.get_dirty()) { return noopAlert() }
-    var errors = this.editor.validate()
+    const errors = this.editor.validate()
     if (errors.length) { return this.error('validation',errors) }
     this.entry.value = this.editor.getValue()
     this.editor.disable()
@@ -211,7 +221,7 @@ class entryView {
     if (!this.confirm_dirty()) {
       this.editor.destroy()
       this.el_main.innerHTML = ''
-      var oid = this.entry.oid
+      const oid = this.entry.oid
       if (!oid) { this.display_new(this.entry.cat) }
       else { this.display_old(oid) }
     }
@@ -273,11 +283,10 @@ class attachView {
   }
 
   display1 (path,data) {
-    this.path = path
     this.version = data.version
     this.set_dirty(false)
-    this.el_main.innerHTML = ''
     this.setPath(path)
+    this.el_main.innerHTML = ''
     this.inputs = []
     for (const [name,mtime,size] of data.content) {this.addRow(name,mtime,size,null)}
     this.show()
@@ -285,19 +294,17 @@ class attachView {
 
   upload (files) {
     for (const file of files) {
-      var progressor = this.progressor(file.name)
-      upload({
-        file:file,url:this.url.attach,chunk:this.chunk,progress:progressor.update,
-        success: (target,mtime) => {progressor.close();this.addRow(target,mtime,file.size,file.name)},
-        error: (err) => {progressor.close();this.error(err)}
-      })
+      const progressor = this.progressor(file.name)
+      upload({file:file,url:this.url.attach,chunk:this.chunk,progress:progressor.update}).
+        then((result)=>{progressor.close();this.addRow(result.name,result.mtime,file.size,file.name)}).
+        catch((err)=>{progressor.close();this.error('upload',err)})
     }
   }
 
   save () {
-    var ops = []
+    const ops = []
     for (const [name,inp,is_new] of this.inputs) {
-      var iname = inp.value.trim()
+      const iname = inp.value.trim()
       if (is_new || iname!=name) { ops.push({src:name,trg:iname,is_new:is_new}) }
     }
     if (!ops.length) return noopAlert()
@@ -320,33 +327,34 @@ class attachView {
   }
 
   setPath (path) {
-    var path_level = (p,name) => {
-      var a = document.createElement('a')
+    const path_level = (p,name) => {
+      const a = document.createElement('a')
+      a.title = p
       a.href = 'javascript:'
       a.innerHTML = name
       a.addEventListener('click',()=>this.display_clean(p),false)
       this.el_path.appendChild(a)
-      var span = document.createElement('span')
+      const span = document.createElement('span')
       span.innerHTML = '/'
       this.el_path.appendChild(span)
-      return a
     }
+    this.path = path
     this.el_path.innerHTML = ''
-    var path = this.path.split('/')
-    var p = `${path[0]}/${path[1]}`
-    path_level(p,'•').title = p
-    for (var i=2;i<path.length;i++) { p = `${p}/${path[i]}`; path_level(p,path[i]) }
+    const comp = path.split('/')
+    let p = `${comp[0]}/${comp[1]}`
+    path_level(p,'•')
+    for (let i=2;i<comp.length;i++) { p = `${p}/${comp[i]}`; path_level(p,comp[i]) }
   }
 
   addRow (name,mtime,size,new_name) {
     if (new_name) {this.set_dirty(true)}
-    var tr = this.el_main.insertRow()
-    var pname = new_name?'New file':name
-    var rname = new_name||name
+    const tr = this.el_main.insertRow()
+    const pname = new_name?'New file':name
+    const rname = new_name||name
     tr.insertCell().innerHTML = mtime
     if (size<0) {
       tr.insertCell().innerHTML = `${-size} item${size==-1?'':'s'}`
-      var cell = tr.insertCell()
+      const cell = tr.insertCell()
       cell.innerHTML = `<a href="javascript:">${pname}</a>`
       cell.firstElementChild.addEventListener('click',()=>this.display_clean(`${this.path}/${name}`),false)
     }
@@ -354,7 +362,7 @@ class attachView {
       tr.insertCell().innerHTML = human_size(size)
       tr.insertCell().innerHTML = `<a target="_blank" href="attach/${this.path}/${rname}">${pname}</a>`
     }
-    var inp = document.createElement('input')
+    const inp = document.createElement('input')
     this.inputs.push([name,inp,new_name!==null])
     tr.insertCell().appendChild(inp)
     inp.size = '50'
@@ -399,50 +407,45 @@ window.onload = function () {
 // Utilities
 //
 
-function upload (req) {
-  // req: object with the following fields
+async function upload(x) {
+  // x: object with the following fields
   //   file: a File or Blob object
-  //   url: must support POST with blob content and target in query string
-  //   success(name,mtime),failure(err),progress(percentcomplete): callbacks
-  //   chunk: int, in MiB
-  // Sends the file (method POST) to the given url
-  // The success callback is passed the file name and last modification time
-  var target = ''
-  var position = 0
-  var nextPosition = 0
-  var size = req.file.size
-  var chunk = (req.chunk||1)*0x100000
-  var progress = req.progress
-  var controller = progress?new AbortController():null
-  var upload1 = () => {
-    nextPosition = Math.min(position+chunk,size)
-    var reader = new FileReader()
-    req1 = {url:`${req.url}?target=${target}`,method:'POST',headers:{'Content-Type':'application/octet-stream'}}
-    if (controller) {
-      req1.signal = controller.signal
-      req1.onUploadProgress = (evt)=>{if(progress((position+evt.loaded)/size)){console.log('abort',position,size);controller.abort()}}
-    }
-    reader.onload = ()=>{
-      req1.data = reader.result
-      axios(req1).then((resp)=>upload2(resp.data)).catch(req.failure)
-    }
-    reader.readAsArrayBuffer(req.file.slice(position,nextPosition))
+  //   url: must support POST with blob content and optional target in query string (generated by the server if not provided)
+  //   chunk (default 1): int, in MiB
+  //   target (optional): target file name
+  //   progress (optional): progress callback with one input (percent_complete)
+  // Sends the file (method POST) by chunks to the given url assumed to return a result object for each chunk
+  // A result object describes the uploaded file after each chunk transfer with 3 fields:
+  //   name (invariable), mtime (last modification time), size (in bytes)
+  // Returns (a promise on) the last result object
+  const file = x.file, url = x.url, progress = x.progress, chunk = (x.chunk||1)*0x100000
+  const req = {method:'POST',headers:{'Content-Type':'application/octet-stream'}}, size = file.size
+  let target = x.target||'', position = 0, nextPosition = 0, result = null, ongoing = true
+  if (progress) {
+    const controller = new AbortController()
+    req.signal = controller.signal
+    req.onUploadProgress = (evt)=>{if(progress((position+evt.loaded)/size)){controller.abort()}}
   }
-  var upload2 = (data) => {
-    target = data.name; position = nextPosition
-    if (position<size) { upload1() }
-    else { req.success(target,data.mtime) }
+  while(ongoing) {
+    nextPosition = position+chunk
+    if (nextPosition>=size) { nextPosition = size; ongoing=false; }
+    req.url = `${url}?target=${target}`
+    req.data = await file.slice(position,nextPosition).arrayBuffer()
+    const resp = await axios(req)
+    result = resp.data
+    target = result.name // in case it was not specified in the input
+    position = nextPosition
   }
-  upload1()
+  return result
 }
 
 function human_size (size) {
   // size: int (number of bytes)
   // returns a human readable string representing size
-  var thr = 1024.
+  const thr = 1024.
+  const units = ['K','M','G','T','P','E','Z']
   if (size<thr) return `${size}B`
   size /= thr
-  var units = ['K','M','G','T','P','E','Z']
   for (const u of units) {
     if (size<thr) return `${size.toFixed(2)}${u}iB`
     size /= thr
