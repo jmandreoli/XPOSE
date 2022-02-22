@@ -42,11 +42,11 @@ Listing view
         <button type="button" id="listing-query" title="Refresh listing" onclick="xpose.current.display()">
           <span class="ui-icon ui-icon-refresh"></span>
         </button>
-        <span onmouseenter="this.lastElementChild.style.display='inline'" onmouseleave="this.lastElementChild.style.display='none'">
+        <span onmouseenter="this.lastElementChild.style.display='inline-grid'" onmouseleave="this.lastElementChild.style.display='none'">
           <button type="button" title="Create a new entry">
             <span class="ui-icon ui-icon-plusthick"></span>
           </button>
-          <span id="listing-new" style="display:none; background-color:ivory; position:absolute; z-index:1;">
+          <span id="listing-new" style="display:none; position:absolute; z-index:1;">
           </span>
         </span>
         <button type="button" title="Toggle query editor" onclick="toggle_display(document.getElementById('listing-editor'))">
@@ -98,7 +98,7 @@ Attachment view
           <span class="ui-icon ui-icon-refresh"></span>
         </button>
         <span>
-          <button type="button" title="Upload a new attachment" onclick="document.getElementById('attach-upload').click()">
+          <button type="button" title="Upload a new attachment" onclick="this.nextElementSibling.click()">
             <span class="ui-icon ui-icon-plusthick"></span>
           </button>
           <input type="file" id="attach-upload" multiple onchange="xpose.current.upload(this.files)" style="display:none;">
