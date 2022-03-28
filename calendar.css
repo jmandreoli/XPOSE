@@ -1,0 +1,7 @@
+.calendar-details { border-collapse: collapse; width: 100%; }
+.calendar-details tbody.event { border: thin solid black; border-bottom: thick solid black; }
+.calendar-details tbody.event th { vertical-align: top; text-align: left; width: 1.8cm; }
+.calendar-details tbody.event td.setting { padding: 2mm; }
+.calendar-details tbody.event div.title { font-weight: bold; }
+.calendar-details tbody.event td.detail { background-color: #f0f0f0; padding: .8mm; }
+.calendar-details tbody.event div.status { float:right; color: Gold; font-weight: bold; font-size: small; }

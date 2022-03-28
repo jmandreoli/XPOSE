@@ -9,8 +9,8 @@
 //
 
 class Xpose {
-  constructor () {
-    this.url = {main:'main.cgi.py',attach:'mainAttach.cgi.py',cats:'cats/.visible.json',jschema:(cat)=>{return `cats/jschemas/${cat}.json`}}
+  constructor (url) {
+    this.url = url
     this.views = {}
     this.current = null
     this.dirty = false
@@ -18,8 +18,8 @@ class Xpose {
     this.addView('listing',new listingView())
     this.addView('entry',new entryView())
     this.addView('attach',new attachView())
-    this.el_view = document.getElementById('xpose-view')
-    this.el_progress = document.getElementById('xpose-progress')
+    this.addView('manage',new manageView())
+    window.addEventListener('beforeunload',(e)=>{ if (this.dirty) {e.preventDefault();e.returnValue=''} },false)
   }
   addView (name,view) {
     view.error = (label,x) => this.error(`${name}:${label}`,x)
@@ -39,7 +39,7 @@ class Xpose {
     if (this.current===view) return
     if (this.current!==null) { this.current.toplevel.style.display = 'none' }
     this.current = view
-    this.el_view.innerHTML = view.name
+    this.el_view.innerText = view.name
     this.current.toplevel.style.display = ''
   }
 
@@ -47,12 +47,12 @@ class Xpose {
     // displays a progress bar and returns an object with the following fields:
     //   update: an update callback to pass to the target task (argument: percent_complete)
     //   close: a close callback (no argument)
-    const div = document.createElement('div')
-    div.innerHTML = `<progress max="1." value="0."></progress><button type="button"><span class="ui-icon ui-icon-closethick"></span></button> <strong>${label}</strong>`
-    const el = div.firstElementChild
+    const div = addElement(this.el_progress,'div')
+    const el = addElement(div,'progress',{max:'1.',value:'0.',})
+    const button = addJButton(div,'closethick',{title:'Interrupt upload'})
+    addText(div,label)
     let cancelled = false
-    el.nextElementSibling.addEventListener('click',()=>{cancelled=true},false)
-    this.el_progress.appendChild(div)
+    button.addEventListener('click',()=>{cancelled=true},false)
     return {
       update:(percent)=>{el.value=percent.toFixed(3);return cancelled},
       close:()=>{this.el_progress.removeChild(div)}
@@ -61,11 +61,23 @@ class Xpose {
   ajaxError (err) {
     let errText = null
     if (err.response) { errText = `Server error ${err.response.status} ${err.response.statusText}\n${err.response.data}` }
-    else if (err.request) { errText = `No response received from Server\n${err.request}` }
+    else if (err.request) { errText = `No response received from Server\n${err.request.url}` }
     else { errText = err.message}
     this.error('ajax',errText)
   }
   error (label,x) { this.views.console.display(this.current,`ERROR: ${label}\n${x===null?'':x}`) }
+  render() { // not sure where it gets invoked!! seems to have a javascript meaning
+    {
+      this.el_progress = addElement(document.body,'div'),{class:'xpose-progress'})
+    }
+    {
+      const h1 = addElement(document.body,'h1')
+      addText(h1,'Xpose: ')
+      this.el_view = addElement(h1,'span')
+    }
+    for (const view of Object.values(this.views)) { document.body.appendChild(view.toplevel) }
+    this.views.listing.display()
+  }
 }
 
 //
@@ -75,36 +87,47 @@ class Xpose {
 class listingView {
 
   constructor () {
-    this.el_main = document.getElementById('listing')
-    this.el_updater = document.getElementById('listing-query')
-    this.el_new = document.getElementById('listing-new')
-    this.el_editor = document.getElementById('listing-editor')
-    this.el_count = document.getElementById('listing-count')
-    const query = `SELECT oid,Short.value as short
-FROM Entry LEFT JOIN Short ON Short.entry=oid
--- WHERE created LIKE '2013-%'
-ORDER BY created DESC
-LIMIT 30`
-    this.editor = new JSONEditor(
-      this.el_editor,
-      {
-        schema: { title: 'Query editor', type: 'string', format: 'textarea', default: query, options: { inputAttributes: { rows: 5, cols: 160 } } },
-        remove_button_labels: true,
-      }
-    ).on('ready',()=>{
-      setTimeout(()=>{this.editor.on('change',()=>{this.set_dirty(true)})},100) // timeout needed
-    })
-    this.toplevel = this.el_main.parentNode
+    this.toplevel = document.createElement('table')
+    const thead = addElement(this.toplevel,'thead')
+    const menu = thead.insertRow().insertCell()
+    { // refresh button
+      const button = this.el_refresh = addJButton(menu,'refresh',{title:'Refresh listing'})
+      button.addEventListener('click',()=>{this.display()},false)
+    }
+    { // go-to "new entry" form
+      const span = addElement(menu,'span')
+      addJButton(span,'plusthick',{title:'Create a new entry'})
+      const newc = this.el_new = addElement(span,'span',{class:'listing-new',style:'display:none'})
+      span.addEventListener('mousedown',()=>{newc.style.display='inline-grid'},false)
+      for (const evType in ['mouseup','mouseleave']) {span.addEventListener(evType,()=>{newc.style.display='none'},false)}
+    }
+    { // toggle query editor button
+      const button = addJButton(menu,'help',{title:'Toggle query editor'})
+      button.addEventListener('click',()=>{toggle_display(this.editor.element)},false)
+    }
+    { // go-to "manage" button
+      const button = addJButton(menu,'wrench',{title:'Manage xpose instance'})
+      button.addEventListener('click',()=>{this.go_manage()},false)
+    }
+    { // info box (number of entries)
+      addText(menu)
+      const span = this.el_count = addElement(menu,'span')
+      addText(menu,' entries')
+    }
+    { // query editor
+      const div = addElement(thead.insertRow().insertCell(),'div',{style:'display:none'})
+      this.editor = new JSONEditor(div,this.editorConfig())
+    }
+    { // listing table
+      this.el_main = addElement(this.toplevel,'tbody',{class:'listing'})
+    }
+    this.active = false
+    this.editor.on('change',()=>{if (this.active) {this.set_dirty(true)} else {this.active=true} })
   }
 
   display () {
-    if (this.el_new.children.length==0) {
-      axios({url:this.url.cats,headers:{'Cache-Control':'no-store'}}).
-        then((resp)=>{this.setupNew(resp.data)}).
-        catch(this.ajaxError)
-    }
     this.editor.disable()
-    axios({url:`${this.url.main}?sql=${encodeURIComponent(this.editor.getValue())}`,headers:{'Cache-Control':'no-store'}}).
+    axios({url:`${this.url.main}/xpose?sql=${encodeURIComponent(this.editor.getValue())}`,headers:{'Cache-Control':'no-store'}}).
       finally(()=>this.editor.enable()).
       then((resp)=>this.display1(resp.data)).
       catch(this.ajaxError)
@@ -112,31 +135,45 @@ LIMIT 30`
 
   display1 (data) {
     this.set_dirty(false)
-    this.el_count.innerHTML = String(data.length)
+    this.el_count.innerText = String(data.length)
     this.el_main.innerHTML = ''
     for (const entry of data) {
       const tr = this.el_main.insertRow()
       tr.addEventListener('click',()=>{this.go_entry_old(entry.oid)},false)
-      tr.insertCell().innerHTML = entry.short
+      tr.title = String(entry.oid)
+      const access = entry.access?'visible':'hidden'
+      tr.insertCell().innerHTML = `<span style="visibility:${access}; font-size:x-small;">🔒</span>${entry.short}`
     }
-    this.el_editor.style.display = 'none'
+    this.editor.element.style.display = 'none'
     this.show()
   }
 
   setupNew (cats) {
     for (const cat of cats) {
-      const span = document.createElement('span')
-      span.innerHTML = cat
-      span.addEventListener('click',(e)=>{this.go_entry_new(cat)},false)
-      this.el_new.appendChild(span)
+      const span = addElement(this.el_new,'span')
+      span.innerText = cat
+      span.addEventListener('mouseup',(e)=>{this.go_entry_new(cat)},false)
     }
   }
+
+  go_manage () { if (!this.confirm_dirty()) this.views.manage.display() }
 
   go_entry_new (cat) { if (!this.confirm_dirty()) this.views.entry.display_new(cat) }
   go_entry_old (oid) { if (!this.confirm_dirty()) this.views.entry.display_old(oid) }
 
-  show_dirty (flag) { this.el_updater.style.backgroundColor = flag?'red':'' }
+  show_dirty (flag) { this.el_refresh.style.backgroundColor = flag?'red':'' }
 
+  editorConfig () {
+    const queryDefault = `SELECT oid,access,Short.value as short
+FROM Entry LEFT JOIN Short ON Short.entry=oid
+-- WHERE created LIKE '2013-%'
+ORDER BY created DESC
+LIMIT 30`
+    return {
+      schema: { title: 'Query editor', type: 'string', format: 'textarea', options: { inputAttributes: { rows: 5, cols: 160 } } },
+      startval: queryDefault
+    }
+  }
 }
 
 //
@@ -146,21 +183,56 @@ LIMIT 30`
 class entryView {
 
   constructor () {
-    this.el_main = document.getElementById('entry')
-    this.el_updater = document.getElementById('entry-save')
-    this.el_delete = document.getElementById('entry-delete')
-    this.el_attach = document.getElementById('entry-attach')
-    this.el_short = document.getElementById('entry-short')
+    this.toplevel = document.createElement('div')
+    const menu = addElement(this.toplevel,'div')
+    { // return button
+      const button = addJButton(menu,'arrowreturnthick-1-w',{title:'Return to listing view'})
+      button.addEventListener('click',()=>{this.close()},false)
+    }
+    { // refresh button
+      const button = addJButton(menu,'refresh',{title:'Refresh entry'})
+      button.addEventListener('click',()=>{this.refresh()},false)
+    }
+    { // save entry button
+      const button = this.el_save = addJButton(menu,'arrowthickstop-1-n',{title:'Save entry'})
+      button.addEventListener('click',()=>{this.save()},false)
+    }
+    { // delete entry button
+      const button = className(addJButton(menu,'trash',{title:'Delete entry (if confirmed)'}),'caution')
+      button.addEventListener('click',()=>{this.remove()},false)
+    }
+    { // go-to "attachment" button
+      const button = addJButton(menu,'folder-open',{title:'Show attachment'})
+      button.addEventListener('click',()=>{this.go_attach()},false)
+    }
+    { // toggle access editor button
+      const button = addJButton(menu,'unlocked',{title:'Toggle access controls editor'})
+      button.addEventListener('click',()=>{toggle_display(this.accessEditor.element)},false)
+      this.el_locked = button
+    }
+    { // info box (short name of entry)
+      addText(menu)
+      const span = this.el_short = addElement(menu,'span')
+      span.style.display = 'none'
+    }
+    { // access editor form
+      const div = addElement(this.toplevel,'div')
+      this.accessEditor = new JSONEditor(div,this.accessEditorConfig())
+      this.accessEditor.on('change',()=>{if(this.active)this.set_dirty(true)})
+    }
+    { // main entry editor form
+      this.el_main = addElement(this.toplevel,'div')
+    }
     this.entry = null
     this.editor = null
-    this.toplevel = this.el_main.parentNode
+    this.active = false
   }
 
   display_new (cat) {
     this.display({ cat: cat, value: {}, short: `New ${cat}` })
   }
   display_old (oid) {
-    axios({url:`${this.url.main}?oid=${encodeURIComponent(oid)}`,headers:{'Cache-Control':'no-store'}}).
+    axios({url:`${this.url.main}/xpose?oid=${encodeURIComponent(oid)}`,headers:{'Cache-Control':'no-store'}}).
       then((resp)=>this.display(resp.data)).
       catch(this.ajaxError)
   }
@@ -168,25 +240,12 @@ class entryView {
   display (entry) {
     this.set_dirty(!('oid' in entry))
     this.entry = entry
-    this.editor = new JSONEditor(
-      this.el_main,
-      {
-        ajax: true,
-        schema: { $ref: this.url.jschema(entry.cat) },
-        display_required_only: true,
-        remove_empty_properties: true,
-        disable_array_delete_all_rows: true,
-        disable_array_delete_last_row: true,
-        remove_button_labels: true,
-        array_controls_top: true,
-        show_opt_in: true
-      }
-    ).on('ready',()=>{
-      this.editor.setValue(entry.value)
-      setTimeout(()=>{this.editor.on('change',()=>{this.set_dirty(true)})},100) // timeout needed
-      this.setShort()
-      this.show()
-    })
+    this.accessEditor.element.style.display = 'none'
+    this.active = false
+    this.accessEditor.setValue(entry.access)
+    this.editor = new JSONEditor(this.el_main,this.editorConfig())
+    this.editor.on('ready',()=>{ this.setShort(); this.setLocked(); this.show() })
+    this.editor.on('change',()=>{if (this.active) {this.set_dirty(true)} else {this.active=true} })
   }
 
   save () {
@@ -194,8 +253,9 @@ class entryView {
     const errors = this.editor.validate()
     if (errors.length) { return this.error('validation',errors) }
     this.entry.value = this.editor.getValue()
+    this.entry.access = this.accessEditor.getValue()||null
     this.editor.disable()
-    axios({url:this.url.main,method:'PUT',data:this.entry}).
+    axios({url:`${this.url.main}/xpose`,method:'PUT',data:this.entry}).
       finally(()=>this.editor.enable()).
       then((resp)=>this.save1(resp.data)).
       catch(this.ajaxError)
@@ -207,12 +267,13 @@ class entryView {
     this.entry.short = data.short
     this.entry.attach = data.attach
     this.setShort()
+    this.setLocked()
   }
 
   remove () {
     if (!deleteConfirm()) return
     this.editor.disable()
-    axios({url:this.url.main,method:'DELETE',data:{oid:this.entry.oid}}).
+    axios({url:`${this.url.main}/xpose`,method:'DELETE',data:{oid:this.entry.oid}}).
       then((resp)=>this.close(true)).
       catch(this.ajaxError)
   }
@@ -243,9 +304,33 @@ class entryView {
     }
   }
 
-  setShort () { this.el_short.innerHTML = this.entry.short; this.el_short.title = this.entry.oid }
+  setShort () { this.el_short.innerText = this.entry.short; this.el_short.title = this.entry.oid }
+  setLocked () { this.el_locked.firstElementChild.className = this.entry.access?'ui-icon ui-icon-locked':'ui-icon ui-icon-unlocked' }
 
-  show_dirty (flag) { this.el_updater.style.backgroundColor = flag?'red':'' }
+  show_dirty (flag) { this.el_save.style.backgroundColor = flag?'red':'' }
+
+  editorConfig () {
+    return {
+      ajax: true,
+      schema: { $ref: this.url.jschema(this.entry.cat) },
+      startval: this.entry.value,
+      display_required_only: true,
+      remove_empty_properties: true,
+      disable_array_delete_all_rows: true,
+      disable_array_delete_last_row: true,
+      remove_button_labels: true,
+      array_controls_top: true,
+      show_opt_in: true
+    }
+  }
+
+  accessEditorConfig () {
+    return {
+      schema: { title: 'Access editor', type: 'string', options: { inputAttributes: { size: 160 } } },
+      startval: null,
+      remove_button_labels: true
+    }
+  }
 }
 
 //
@@ -255,29 +340,54 @@ class entryView {
 class attachView {
 
   constructor () {
-    this.el_main = document.getElementById('attach')
-    this.el_short = document.getElementById('attach-short')
-    this.el_path = document.getElementById('attach-path')
-    this.el_updater = document.getElementById('attach-save')
-    this.el_upload = document.getElementById('attach-upload')
+    this.toplevel = document.createElement('table')
+    const thead = addElement(this.toplevel,'thead')
+    const menu = thead.insertRow().insertCell()
+    { // return button
+      const button = addJButton(menu,'arrowreturnthick-1-w',{title:'Return to entry view'})
+      button.addEventListener('click',()=>{this.close()},false)
+    }
+    { // refresh button
+      const button = addJButton(menu,'refresh',{title:'Refresh attachment'})
+      button.addEventListener('click',()=>{this.refresh()},false)
+    }
+    { // upload form
+      const button = addJButton(menu,'plusthick',{title:'Upload a new attachment'})
+      const input = addElement(menu,'input',{'type':'file','multiple':'multiple','style':'display:none'})
+      button.addEventListener('click',()=>{input.click()},false)
+      input.addEventListener('change',()=>{this.upload(input.files)},false)
+    }
+    { // save button
+      const button = addJButton(menu,'arrowthickstop-1-n',{title:'Save attachment'})
+      button.addEventListener('click',()=>{this.save()},false)
+      this.el_save = button
+    }
+    { // infobox (entry short name and path)
+      addText(menu)
+      this.el_short = addElement(menu,'span')
+      addText(menu)
+      this.el_path = addElement(menu,'span')
+    }
+    { // listing table
+      this.el_main = addElement(this.toplevel,'tbody',{class:'attach'})
+    }
     this.chunk = 1
     this.entry = null
     this.path = null
     this.version = null
     this.inputs = null
-    this.toplevel = this.el_main.parentNode
   }
 
   display_entry (entry) {
     this.entry = entry
-    this.el_short.innerHTML = entry.short
+    this.el_short.innerText = entry.short
     this.display(entry.attach)
   }
 
   display_clean(path) { if (!this.confirm_dirty()) this.display(path) }
 
   display(path) {
-    axios({url:`${this.url.attach}?path=${encodeURIComponent(path)}`,headers:{'Cache-Control':'no-store'}}).
+    axios({url:`${this.url.main}/attach?path=${encodeURIComponent(path)}`,headers:{'Cache-Control':'no-store'}}).
       then((resp)=>this.display1(path,resp.data)).
       catch(this.ajaxError)
   }
@@ -295,7 +405,7 @@ class attachView {
   upload (files) {
     for (const file of files) {
       const progressor = this.progressor(file.name)
-      upload({file:file,url:this.url.attach,chunk:this.chunk,progress:progressor.update}).
+      upload({file:file,url:`${this.url.main}/attach`,chunk:this.chunk,progress:progressor.update}).
         then((result)=>{progressor.close();this.addRow(result.name,result.mtime,file.size,file.name)}).
         catch((err)=>{progressor.close();this.error('upload',err)})
     }
@@ -308,7 +418,7 @@ class attachView {
       if (is_new || iname!=name) { ops.push({src:name,trg:iname,is_new:is_new}) }
     }
     if (!ops.length) return noopAlert()
-    axios({url:this.url.attach,method:'PATCH',data:{ops:ops,path:this.path,version:this.version}}).
+    axios({url:`${this.url.main}/attach`,method:'PATCH',data:{ops:ops,path:this.path,version:this.version}}).
       then((resp)=>this.save1(resp.data)).
       catch(this.ajaxError)
   }
@@ -328,15 +438,10 @@ class attachView {
 
   setPath (path) {
     const path_level = (p,name) => {
-      const a = document.createElement('a')
-      a.title = p
-      a.href = 'javascript:'
-      a.innerHTML = name
+      const a = addElement(this.el_path,'a',{title:p,href:'javascript:'})
+      a.innerText = name
       a.addEventListener('click',()=>this.display_clean(p),false)
-      this.el_path.appendChild(a)
-      const span = document.createElement('span')
-      span.innerHTML = '/'
-      this.el_path.appendChild(span)
+      addText(this.el_path,'/')
     }
     this.path = path
     this.el_path.innerHTML = ''
@@ -349,28 +454,124 @@ class attachView {
   addRow (name,mtime,size,new_name) {
     if (new_name) {this.set_dirty(true)}
     const tr = this.el_main.insertRow()
-    const pname = new_name?'New file':name
-    const rname = new_name||name
-    tr.insertCell().innerHTML = mtime
+    tr.insertCell().innerText = mtime
     if (size<0) {
-      tr.insertCell().innerHTML = `${-size} item${size==-1?'':'s'}`
+      tr.insertCell().innerText = `${-size} item${size==-1?'':'s'}`
       const cell = tr.insertCell()
-      cell.innerHTML = `<a href="javascript:">${pname}</a>`
+      cell.innerHTML = `<a href="javascript:">${name}</a>`
       cell.firstElementChild.addEventListener('click',()=>this.display_clean(`${this.path}/${name}`),false)
     }
     else {
-      tr.insertCell().innerHTML = human_size(size)
-      tr.insertCell().innerHTML = `<a target="_blank" href="attach/${this.path}/${rname}">${pname}</a>`
+      tr.insertCell().innerText = human_size(size)
+      tr.insertCell().innerHTML = `<a target="_blank" href="${this.url.attach}/${new_name?'.uploaded':this.path}/${name}">${new_name?'New file':name}</a>`
     }
-    const inp = document.createElement('input')
-    this.inputs.push([name,inp,new_name!==null])
-    tr.insertCell().appendChild(inp)
-    inp.size = '50'
-    inp.value = rname
+    const inp = addElement(tr.insertCell(),'input',{size:'50',value:new_name||name})
     inp.addEventListener('input',()=>{this.set_dirty(true)},false)
+    this.inputs.push([name,inp,new_name!==null])
   }
 
-  show_dirty (flag) { this.el_updater.style.backgroundColor = flag?'red':'' }
+  show_dirty (flag) { this.el_save.style.backgroundColor = flag?'red':'' }
+}
+
+//
+// manageView
+//
+
+class manageView {
+
+  constructor () {
+    this.toplevel = document.createElement('div')
+    const menu = addElement(this.toplevel,'div')
+    { // return button
+      const button = addJButton(menu,'arrowreturnthick-1-w',{title:'Return to listing view'})
+      button.addEventListener('click',()=>{this.close()},false)
+    }
+    { // new shadow button
+      const button = this.el_shadow = addJButton(menu,'gear',{title:'Build new shadow version',style:'display:none'})
+      button.addEventListener('click',()=>{this.refresh()},false)
+    }
+    { // TBD
+      const button = this.el_save = addJButton(menu,'arrowthickstop-1-n',{title:'Copy shadow version into current one',style:'background-color:red;display:none;'})
+      button.addEventListener('click',()=>{this.save()},false)
+    }
+    { // infobox
+      addText(menu,' Current version: ')
+      this.el_version = addElement(menu,'span')
+    }
+    {
+      const div = addElement(this.toplevel,'div')
+      {
+        this.el_stats = {}
+        const table = addElement(div,'table',{class:'manage-stats'})
+        const thead = addElement(table,'thead')
+        const td = thead.insertRow().insertCell()
+        td.colSpan = '2'; td.innerText = 'Statistics'
+        const tbody = addElement(table,'tbody')
+        {
+          const tr = tbody.insertRow()
+          tr.insertCell().innerText = 'cats'
+          this.el_stats.cat = addElement(tr.insertCell(),'table')
+        }
+        {
+          const tr = tbody.insertRow()
+          tr.insertCell().innerText = 'access'
+          this.el_stats.access = addElement(tr.insertCell(),'table')
+        }
+      }
+    }
+  }
+
+  display () {
+    axios({url:`${this.url.main}/manage`,headers:{'Cache-Control':'no-store'}}).
+      then((resp)=>this.display1(resp.data)).
+      catch(this.ajaxError)
+  }
+
+  display1 (data) {
+    console.log(data)
+    this.el_version.innerText = String(data.version)
+    if (data.shadow===null) { this.el_save.style.display = this.el_shadow.style.display = 'none' }
+    else {
+      this.el_shadow.style.display = ''
+      this.el_shadow.firstElementChild.className = data.shadow.version<=data.version?'ui-icon ui-icon-gear':'ui-icon ui-icon-refresh'
+      this.el_save.style.display = data.shadow.version<=data.version?'none':''
+    }
+    const stats = data.stats
+    const el_cat = this.el_stats.cat
+    el_cat.innerHTML = ''
+    for (const [cat,cnt] of Object.entries(stats.cat)) {
+      const tr = el_cat.insertRow()
+      addText(tr.insertCell(),cat)
+      addText(tr.insertCell(),String(cnt))
+    }
+    const el_access = this.el_stats.access
+    el_access.innerHTML = ''
+    for (const [access,cnt] of Object.entries(stats.access)) {
+      const tr = el_access.insertRow()
+      addText(tr.insertCell(),access)
+      addText(tr.insertCell(),String(cnt))
+    }
+    this.show()
+  }
+
+  refresh () {
+    document.body.style.pointerEvents='none'
+    axios({url:`${this.url.main}/manage`,method:'POST'}).
+      finally(()=>document.body.style.pointerEvents='auto').
+      then((resp)=>this.display1(resp.data)).
+      catch(this.ajaxError)
+  }
+
+  save () {
+    if (!window.confirm('You are about to replace the entire Xpose instance with its shadow.')) return
+    document.body.style.pointerEvents='none'
+    axios({url:`${this.url.main}/manage`,method:'PUT'}).
+      finally(()=>document.body.style.pointerEvents='auto').
+      then((resp)=>this.display1(resp.data)).
+      catch(this.ajaxError)
+  }
+
+  close () { this.views.listing.display() }
 }
 
 //
@@ -379,13 +580,17 @@ class attachView {
 
 class consoleView {
   constructor () {
-    this.el_main = document.getElementById('console')
+    this.toplevel = document.createElement('div')
+    this.el_main = addElement(this.toplevel,'textarea',{class:'console caution'})
+    {
+      const button = addJButton(this.toplevel,'arrowreturnthick-1-w',{class:'caution'})
+      button.addEventListener('click',()=>{this.close()},false)
+    }
     this.origin = null
-    this.toplevel = this.el_main.parentNode
   }
   display (origin,msg) {
     this.origin = origin
-    this.el_main.innerHTML = msg
+    this.el_main.value = msg
     this.show()
   }
   close () {
@@ -393,16 +598,6 @@ class consoleView {
   }
 }
 
-//
-// Main call
-//
-
-xpose = null
-window.onload = function () {
-  xpose = new Xpose()
-  window.addEventListener('beforeunload',function (e) { if (xpose.dirty) {e.preventDefault();e.returnValue=''} },false)
-  xpose.views.listing.display()
-}
 //
 // Utilities
 //
@@ -455,6 +650,23 @@ function human_size (size) {
 
 // short-hands
 
+function addElement(container,tag,attrs) {
+	const el = document.createElement(tag)
+	if (attrs) { for (const [k,v] of Object.entries(attrs)) {el.setAttribute(k,v)} }
+	container.appendChild(el)
+	return el
+}
+function addJButton(container,icon,attrs) {
+  const button = addElement(container,'button',attrs)
+  addElement(button,'span',{class:`ui-icon ui-icon-${icon}`})
+  return button
+}
+function addText(container,data) {
+  const text = document.createTextNode(data||' ')
+  container.appendChild(text)
+  return container
+}
+function className(element,c) { element.className = c; return element }
 function toggle_display (el) { el.style.display = (el.style.display?'':'none') }
 function unsavedConfirm () { return window.confirm('Unsaved changes will be lost. Are you sure you want to proceed ?') }
 function deleteConfirm () { return window.confirm('Are you sure you want to delete this entry ?') }

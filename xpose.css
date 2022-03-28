@@ -1,10 +1,15 @@
 h1 { background-color: black; color: white; }
-#listing td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
-#listing td:hover { background-color: lavender; }
-#listing-new { border: thin solid grey; border-bottom: none; background-color: ghostwhite; }
-#listing-new span { border-bottom: thin solid grey; padding: 3px; font-weight: bold; }
-#listing-new span:hover { background-color: grey; color: ghostwhite; }
-#attach td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
-#xpose-progress div { border: thin solid red; }
-div.console { border: thin solid red; background-color: linen; }
-div.console button { border: thin solid red; float: right; }
+.listing td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
+.listing td:hover { background-color: lavender; }
+.listing-new { position:absolute; z-index:1; border: thin solid grey; border-bottom: none; background-color: ghostwhite; }
+.listing-new span { border-bottom: thin solid grey; padding: 3px; font-weight: bold; }
+.listing-new span:hover { filter:invert(100%) }
+.caution { border: thin solid red; }
+.attach td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
+.manage-stats { empty-cells: show; border-collapse: collapse; }
+.manage-stats td { border: thin solid black; }
+.manage-stats td:first-child { font-weight: bold; }
+xpose-progress { border:0; padding:0; }
+xpose-progress div { border: thin solid red; }
+console { background-color: linen; width: 100%; height: 30em; }
+console + button { position: absolute; top: 0; right:0;  }
