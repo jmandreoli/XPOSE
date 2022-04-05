@@ -1,78 +1,13 @@
 # Creation date:        2022-01-15
 # Contributors:         Jean-Marc Andreoli
 # Language:             python
-# Purpose:              Xpose: a JSON database manager (server side)
+# Purpose:              Xpose: attachment folder operations
 #
 
-import sys,os,json,shutil
+import shutil
 from pathlib import Path
 from datetime import datetime
-from http import HTTPStatus
-from urllib.parse import parse_qsl
 from typing import Union, Callable, Dict, Any
-from . import XposeBase
-from utils import CGIMixin,http_raise,http_ts,parse_input
-
-#======================================================================================================================
-class XposeAttach (XposeBase,CGIMixin):
-  r"""
-An instance of this class is a CGI resource managing the Xpose attachment folder.
-  """
-#======================================================================================================================
-
-  def __init__(self,umask:int=0o2,chunk:int=0x100000,**ka):
-    os.umask(umask)
-    self.chunk = chunk
-    super().__init__(**ka)
-
-#----------------------------------------------------------------------------------------------------------------------
-  def do_get(self):
-    r"""
-Input is expected as an (encoded) form with a single field ``path``.
-    """
-#----------------------------------------------------------------------------------------------------------------------
-    form = dict(parse_qsl(os.environ['QUERY_STRING']))
-    path,level = self.attach.getpath(form['path'])
-    content = self.attach.ls(path)
-    return json.dumps({'content':content,'version':self.version(path),'toplevel':level==0}),{'Content-Type':'text/json'}
-
-#----------------------------------------------------------------------------------------------------------------------
-  def do_patch(self):
-    r"""
-Input is expected as a JSON encoded object with fields ``path``, ``version`` and ``ops``, the latter being a list of operations. An operation is specified as an object with fields ``src``, ``trg`` (relative paths) and ``is_new`` (boolean).
-    """
-#----------------------------------------------------------------------------------------------------------------------
-    content = parse_input()
-    path,version,ops = content['path'],content['version'],content['ops']
-    with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations, no transaction is performed
-      path,level = self.attach.getpath(path)
-      if self.version(path) != version: http_raise(HTTPStatus.CONFLICT)
-      errors = [err for op in ops if (err:=self.attach.do(path,op['src'].strip(),op['trg'].strip(),bool(op['is_new']))) is not None]
-      content = self.attach.ls(path)
-      version = self.version(path)
-    return json.dumps({'content':content,'version':version,'toplevel':level==0,'errors':errors}), {'Content-Type':'text/json'}
-
-#----------------------------------------------------------------------------------------------------------------------
-  def do_post(self):
-    r"""
-Input is expected as an octet stream.
-    """
-#----------------------------------------------------------------------------------------------------------------------
-    form = dict(parse_qsl(os.environ['QUERY_STRING']))
-    target = form.get('target')
-    assert os.environ['CONTENT_TYPE'] == 'application/octet-stream'
-    res = self.attach.upload(sys.stdin.buffer,int(os.environ['CONTENT_LENGTH']),target,chunk=self.chunk)
-    content = dict(zip(('name','mtime','size'),res))
-    return json.dumps(content), {'Content-Type':'text/json'}
-
-#----------------------------------------------------------------------------------------------------------------------
-  @staticmethod
-  def version(path:Path):
-#----------------------------------------------------------------------------------------------------------------------
-    if path.exists():
-      s = path.stat()
-      return [s.st_ino,s.st_mtime]
-    else: return None
 
 #======================================================================================================================
 class Attach:
@@ -81,7 +16,7 @@ An instance of this class manages an xpose instance's attachments (field ``attac
   """
 #======================================================================================================================
 
-  def __init__(self,root,namer): self.root,self.namer = root,namer
+  def __init__(self,root): self.root = root.resolve()
 
 #----------------------------------------------------------------------------------------------------------------------
   def getpath(self,path:Union[str,Path]):

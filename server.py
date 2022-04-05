@@ -1,10 +1,18 @@
-import sys,sqlite3,shutil,json,traceback,dill as pickle
+# Creation date:        2022-01-15
+# Contributors:         Jean-Marc Andreoli
+# Language:             python
+# Purpose:              Xpose: instance management operations
+#
+
+import os,sys,sqlite3,shutil,json,traceback,dill as pickle
 from functools import cached_property
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qsl
 from typing import Union, Callable, Dict, Any
-from . import XposeBase
-from utils import CGIMixin,http_raise,http_ts,parse_input
+from . import XposeBase, Cats
+from .attach import Attach
+from .utils import CGIMixin,http_raise,http_ts,parse_input,set_config,get_config
 
 XposeSchema = '''
 CREATE TABLE Entry (
@@ -19,10 +27,13 @@ CREATE TABLE Entry (
   memo JSON NULLABLE
 );
 
-CREATE TRIGGER EntryAttach AFTER INSERT ON Entry
+CREATE TRIGGER EntryTriggerInsert AFTER INSERT ON Entry
   BEGIN UPDATE Entry SET attach=create_attach(oid,attach) WHERE oid=NEW.oid; END;
-
-CREATE TRIGGER EntryDelete AFTER DELETE ON Entry
+CREATE TRIGGER EntryTriggerUpdateAccess AFTER UPDATE OF access ON Entry
+  BEGIN SELECT authoriser(NEW.access,NEW.attach); END;
+CREATE TRIGGER EntryTriggerUpdateAttach AFTER UPDATE OF attach ON Entry
+  BEGIN SELECT authoriser(NEW.access,NEW.attach); END;
+CREATE TRIGGER EntryTriggerDelete AFTER DELETE ON Entry
   BEGIN SELECT delete_attach(OLD.attach); END;
 
 CREATE INDEX EntryIndexCat ON Entry ( cat );
@@ -30,9 +41,14 @@ CREATE INDEX EntryIndexModified ON Entry ( modified );
 CREATE UNIQUE INDEX EntryIndexCreated ON Entry ( created );
 
 CREATE TABLE Short (
-  entry INTEGER PRIMARY KEY REFERENCES Entry ON DELETE CASCADE,
+  entry INTEGER PRIMARY KEY REFERENCES Entry,
   value TEXT NOT NULL
 ) WITHOUT ROWID;
+
+CREATE TRIGGER ShortTriggerBeforeDelete BEFORE DELETE ON Entry
+  BEGIN DELETE FROM Short WHERE entry=OLD.oid; END;
+CREATE TRIGGER ShortTriggerBeforeUpdate BEFORE UPDATE OF value ON Entry
+  BEGIN DELETE FROM Short WHERE entry=OLD.oid; END;
 '''
 
 #======================================================================================================================
@@ -41,6 +57,13 @@ class XposeServer (XposeBase,CGIMixin):
 An instance of this class provides various management operations on an Xpose instance.
   """
 #======================================================================================================================
+
+  def __init__(self,authoriser=None,attach_namer=None,**ka):
+    super().__init__(**ka)
+    self.authoriser = authoriser
+    self.attach_namer = attach_namer
+    self.attach = Attach(self.root/'attach')
+    self.cats = Cats(self.root/'cats')
 
 #----------------------------------------------------------------------------------------------------------------------
   def load(self,content:Union[str,Path,list],with_oid:bool=False):
@@ -67,24 +90,24 @@ Loads some entries in the index database. Entries are validated, and behaviour i
       a = f'{i:04x}'; a = f'{a[:2]}/{a[2:]}' # arbitrary 1-1 encoding of i
       Info[a] = row['attach']; row['attach'] = a
       return tuple(row[f] for f in fields)
-    def create_attach(oid,a,enc=self.attach.namer.int2str):
+    def create_attach(oid,a,namer=self.attach_namer,root=self.attach.root):
       a = Info[a]
-      p = enc(oid)
-      root = self.attach.root/p
+      attach = namer(oid)
       if a is not None:
         try:
           for name,src in a.items():
-            trg = root/name
+            trg = root/attach/name
             trg.parent.mkdir(parents=True,exist_ok=True)
             trg.hardlink_to(src)
         except:
           traceback.print_exc(file=sys.stderr); raise
-      return p
+      return attach
     if isinstance(content,list): listing = content
     else:
       with open(content) as u: listing = json.load(u)['listing']
     with self.connect() as conn:
       conn.create_function('create_attach',2,create_attach) # overrides the default
+      conn.create_function('authoriser',2,(lambda access,attach,auth=self.authoriser,root=self.attach.root: auth(access,root/attach)))
       fields = get_fields(conn)
       if not with_oid: fields.remove('oid')
       field_set = set(fields)
@@ -94,7 +117,7 @@ Loads some entries in the index database. Entries are validated, and behaviour i
       conn.executemany(sql,listing)
 
 #----------------------------------------------------------------------------------------------------------------------
-  def dump(self,path:Union[str,Path]=None,clause:str=None,with_oid:bool=False):
+  def dump(self,clause:str=None,with_oid:bool=False,path:Union[str,Path]=None):
     r"""
 Extracts a list of entries from the index database. If *with_oid* is :const:`True` (resp. :const:`False`), the entries will have (resp. not have) an ``oid`` field. Furthermore, the ``attach`` field has the same form as in :meth:`load`.
 
@@ -115,10 +138,11 @@ Extracts a list of entries from the index database. If *with_oid* is :const:`Tru
     with self.connect() as conn:
       conn.row_factory = sqlite3.Row
       listing = list(map(trans,conn.execute(f'SELECT * FROM Entry{clause_}').fetchall()))
+      user_version, = conn.execute('PRAGMA user_version').fetchone()
       ts = datetime.now().isoformat(timespec='seconds')
     if path is None: return listing
     with open(path,'w') as v:
-      json.dump({'meta':{'origin':'XposeDump','timestamp':ts,'root':str(self.root),'clause':clause},'listing':listing},v,indent=1)
+      json.dump({'meta':{'origin':'XposeDump','timestamp':ts,'root':str(self.root),'clause':clause,'user_version':user_version},'listing':listing},v,indent=1)
 
 #----------------------------------------------------------------------------------------------------------------------
   def precompute_trigger(self,table:str,cat:str,defn:str,when:str=None):
@@ -131,73 +155,39 @@ Declares a trigger on ``INSERT`` or ``UPDATE`` operations on the ``Entry`` table
 :param defn: what to insert in the target table, as an SQL ``SELECT`` statement or ``VALUES`` clause
     """
 #----------------------------------------------------------------------------------------------------------------------
-    def create_trigger(op,delete):
+    def create_trigger(op):
       return f'''
-CREATE TRIGGER {table}Trigger{op.split(' ',1)[0].title()}{''.join(z.title() for z in cat.split('/'))}{when_}
+CREATE TRIGGER {table}Trigger{op.split(' ',1)[0].title()}{cat_}{when_}
 AFTER {op} ON Entry WHEN NEW.cat='{cat}'{when}
 BEGIN
-  {delete}INSERT INTO {table}
+  INSERT INTO {table}
 {defn};
 END'''
     defn = '\n'.join(f'    {x}' for x in defn.split('\n') if x.strip())
+    cat_ = ''.join(z.title() for z in cat.split('/'))
     when,when_ = ('','') if when is None else (f' AND {when}',f'{sum(ord(x) for x in when):05x}')
-    script = ';\n'.join(create_trigger(*x) for x in (('INSERT',''),('UPDATE OF value',f'DELETE FROM {table} WHERE entry=OLD.oid;\n  ')))
+    script = ';\n'.join(create_trigger(op) for op in ('INSERT','UPDATE OF value'))
     with self.connect() as conn: conn.executescript(script)
 
 #----------------------------------------------------------------------------------------------------------------------
-  @classmethod
-  def initial(cls,root:Union[str,Path]='.',config:dict[str,Any]=None):
-    r"""
-Creates an initial xpose instance in a root folder.
-
-:param root: a path to the instance
-    """
+  def status(self):
 #----------------------------------------------------------------------------------------------------------------------
-    cats = Path(cats).resolve()
-    assert cats.is_dir()
-    for _f in cats.iterdir(): pass # check readable
-    upgrader = Path(upgrader).resolve()
-    assert upgrader.is_file()
-    exec(upgrader.read_text(),{}) # check readable and pythonic
-    root = Path(root).resolve()
-    root.mkdir()
-    with (root/'.config').open('wb') as v: pickle.dump(config,v)
-    (root/'cats').symlink_to(cats)
-    (root/'upgrader.py').symlink_to(upgrader)
-    (root/'attach').mkdir(); (root/'attach'/'.uploaded').mkdir()
-    (root/'.htacess').write_text('<FilesMatch ".*\\.db$">\nRequire all denied\n</FilesMatch>')
-    self = cls(root)
-    with self.connect() as conn: conn.executescript(XposeSchema)
-    return self
-
-  @staticmethod
-  def status(xpose:'XposeServer'):
-    with xpose.connect(isolation_level='IMMEDIATE') as conn:
+    with self.connect(isolation_level='IMMEDIATE') as conn:
       version, = conn.execute('PRAGMA user_version').fetchone()
       stats = {
         'cat': dict(conn.execute('SELECT cat,count(*) as cnt FROM Entry GROUP BY cat ORDER BY cnt DESC')),
         'access': dict(conn.execute('SELECT coalesce(access,\'\'),count(*) as cnt FROM Entry GROUP BY access ORDER BY cnt DESC')),
       }
-      ts = xpose.index_db.stat().st_mtime
-    shadow = None
-    if xpose.upgrader.get(version) is not None:
-      try: shadow = xpose.status(XposeServer(root=xpose.root/'shadow'))
-      except: shadow = {'version':-1}
-    return dict(ts=ts,version=version,shadow=shadow,stats=stats)
-
-  @cached_property
-  def upgrader(self)->dict[int,Callable[[XposeBase],tuple[Union[str,Path],str,dict[str,Any],list]]]:
-    ns = {}
-    exec((self.root/'upgrader.py').read_text(),ns)
-    return dict((int(k[9:]),upg) for k,upg in ns.items() if k.startswith('upgrader_'))
+      ts = self.index_db.stat().st_mtime
+    return dict(root=str(self.root),ts=ts,version=version,stats=stats)
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Returns the available upgrade if any.
+No input expected.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    s = self.status(self)
+    s = self.status()
     return json.dumps(s),{'Content-Type':'text/json','Last-Modified':http_ts(s['ts'])}
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -206,19 +196,60 @@ Returns the available upgrade if any.
 No input expected.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    status = self.status(self)
-    version = status['version']
-    upgrader = self.upgrader.get(version)
-    assert upgrader is not None
-    listing = upgrader(self)
-    listing.sort(key=(lambda entry: entry['created']))
-    p = self.root/'shadow'
-    if p.exists(): shutil.rmtree(p)
-    shadow = XposeServer.initial(p,upgrader=self.root/'upgrader.py')
-    version += 1
-    with shadow.connect() as conn:
-      if schema: conn.executescript(schema)
-      conn.execute(f'PRAGMA user_version = {version}')
-    shadow.load(listing)
-    status.update(shadow=self.status(shadow))
-    return json.dumps(status),{'Content-Type':'text/json'}
+    preserve = ()
+    if self.root.name == 'shadow': # self is the shadow instance; mirror is the real instance
+      mirror = self.root.parent
+      upgrader = mirror/'upgrader.py'
+      preserve = (self.root,upgrader) # in mirror (real)
+    else: # self is the real instance; mirror is the shadow instance
+      upgrader = self.root/'upgrader.py'
+      mirror = self.root/'shadow'
+      cats = mirror/'cats'
+      if not cats.exists(): cats.touch() # just to make sure it is there; will be replaced by appropriate symlink
+      preserve = (cats,) # in mirror (shadow)
+    upgrade = {}; exec(upgrader.read_text(),upgrade)
+    # collect self entries
+    with self.connect() as conn: user_version, = conn.execute('PRAGMA user_version').fetchone()
+    listing = self.dump()
+    # upgrade entry listing
+    while True:
+      cfg = upgrade[f'upgrade_{user_version}'](listing)
+      if cfg is not None: break
+      user_version += 1
+    # initialise mirror root and load entry listing
+    initial(mirror,cfg,user_version,preserve).load(listing)
+    return json.dumps({'transfered':len(listing)}),{'Content-Type':'text/json'}
+
+#======================================================================================================================
+class XposeInit (XposeBase,CGIMixin):
+#======================================================================================================================
+
+  def do_get(self):
+    upgrader = self.root/'upgrader.py'
+    upgrade = {}; exec(upgrader.read_text(),upgrade)
+    cfg = upgrade['initial']()
+    initial(self.root,cfg,preserve=(upgrader,))
+    (self.root/'shadow').mkdir()
+    (self.root/'shadow'/'cats').symlink_to(cfg.cats)
+    return '{}',{'Content-Type':'text/json'}
+
+#======================================================================================================================
+def initial(path,cfg,user_version=0,preserve=()):
+#======================================================================================================================
+  for f in path.iterdir():
+    if f in preserve: continue
+    if not f.is_symlink() and f.is_dir(): shutil.rmtree(f)
+    else: f.unlink()
+  (path/'.htaccess').write_text('<FilesMatch ".*\\.db$">\nRequire all denied\n</FilesMatch>')
+  (path/'attach').mkdir();(path/'attach'/'.uploaded').mkdir()
+  cats = path/'cats'
+  if cats.exists(): cats.unlink(); cats.symlink_to(cfg.cats)
+  else: shutil.copytree(cfg.cats,cats,symlinks=True)
+  (path/'.config').mkdir()
+  set_config(path/'.config',**cfg.setup(path))
+  xpose = get_config(path/'.config','manage')
+  with xpose.connect() as conn:
+    conn.executescript(XposeSchema)
+    conn.execute(f'PRAGMA user_version = {user_version}')
+  xpose.cats.initial(xpose=xpose)
+  return xpose

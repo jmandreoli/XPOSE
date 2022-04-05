@@ -1,11 +1,16 @@
-import sys,os,sqlite3,shutil,json,re,traceback,dill as pickle
-from functools import cached_property, cache, singledispatch
-from datetime import datetime
+# Creation date:        2022-01-15
+# Contributors:         Jean-Marc Andreoli
+# Language:             python
+# Purpose:              Xpose: misc utilities
+#
+
+import sys,os,json,re,dill as pickle
 from pathlib import Path
+from functools import singledispatch
+from datetime import datetime
 from http import HTTPStatus
 from urllib.parse import parse_qsl,urljoin
 from typing import Union, Callable, Dict, Any
-from enum import Enum
 
 #======================================================================================================================
 class CGIMixin:
@@ -37,14 +42,13 @@ class IntStrConverter:
   r"""
 An instance of this class is a 1-1 mapping between the interval of whole numbers from 0 (inclusive) to 0x100000 (exclusive) and a set of strings of the form \*\*/\*\* (each \* being a character in *symbols*). Suitable for defining attachment paths. Example::
 
-   c = IntStrConverter(check=True) # all parameters are initialised randomly
+   c = IntStrConverter() # all parameters are initialised randomly
    L = list(range(0x100000))
    assert [c.str2int(s) for s in [c.int2str(n) for n in L]] == L
 
 :param shift: any integer
 :param perm: a permutation of (0,...,19)
-:param symbols: a string of length 32 where each character occurs only once
-:param check: if :const:`True`, checks the value of each of the other parameters, and, when missing, generates some valid random value
+:param symbols: a string of length 32 where each character occurs only once and is allowed in a filename
   """
 #======================================================================================================================
   shift : int
@@ -53,14 +57,14 @@ An instance of this class is a 1-1 mapping between the interval of whole numbers
   perm_: tuple[int,...] # inverse of perm
   symbols_: dict[str,str] # inverse of symbols
 
-  def __init__(self,shift:int=0xe1e06,perm:tuple[int,...]=(17,12,9,6,11,14,0,4,19,8,1,18,3,7,5,16,10,2,15,13),symbols:str='0123456789ABCDEFGHIJKLMNOPQRSTUV'):
+  def __init__(self,shift:int=None,perm:tuple[int,...]=None,symbols:str=None):
     from random import randint, shuffle
-    from string import ascii_uppercase, digits
+    from string import ascii_letters, digits
     if shift is None: shift = randint(0,0x100000)
     else: assert isinstance(shift,int)
     if perm is None: p = list(range(20)); shuffle(p); perm = tuple(p)
     else: assert set(perm) == set(range(20))
-    if symbols is None: s = list((digits+ascii_uppercase)[:32]); shuffle(s); symbols = ''.join(s)
+    if symbols is None: s = list(digits+ascii_letters); shuffle(s); symbols = ''.join(s[:32])
     else: assert isinstance(symbols,str) and len(symbols) == 32 and len(set(symbols)) == 32
     self.shift,self.perm = shift,perm
     self.perm_ = tuple(self.perm.index(i) for i in range(20))
@@ -89,9 +93,8 @@ An instance of this class is a 1-1 mapping between the interval of whole numbers
     n = int(x,2) # convert: 20-bit-str -> 20-bit-int
     return (n-self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
 
-
 #======================================================================================================================
-# Utilities
+# Miscellaneous
 #======================================================================================================================
 
 class HTTPException (Exception):
@@ -99,9 +102,7 @@ class HTTPException (Exception):
 def http_raise(status): raise HTTPException(status)
 def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
-#----------------------------------------------------------------------------------------------------------------------
 def parse_input(mime:str='application/json',transf:bool=True):
-#----------------------------------------------------------------------------------------------------------------------
   assert os.environ['CONTENT_TYPE'].startswith(mime)
   n = int(os.environ['CONTENT_LENGTH'])
   x = []
@@ -116,9 +117,14 @@ def parse_input(mime:str='application/json',transf:bool=True):
     elif mime == 'application/x-www-form-urlencoded': r = dict(parse_qsl(r)) # very basic, no multiple values with same field
   return r
 
-#----------------------------------------------------------------------------------------------------------------------
+def set_config(path,**ka):
+  for key,cfg in ka.items():
+    with (Path(path)/key).with_suffix('.pk').open('wb') as v: pickle.dump(cfg,v)
+def get_config(path,key):
+  with (Path(path)/key).with_suffix('.pk').open('rb') as u: cfg = pickle.load(u)
+  return cfg
+
 class str_md(str): pass  # to identify Markdown strings
-#----------------------------------------------------------------------------------------------------------------------
 @singledispatch
 def rebase(x,base): return urljoin(base,x)
 @rebase.register(str_md)

@@ -1,7 +1,30 @@
-import os
-from functools import cached_property, cache
+# Creation date:        2022-01-15
+# Contributors:         Jean-Marc Andreoli
+# Language:             python
+# Purpose:              Xpose: access control operations
+#
+
+import os,re
+from functools import cached_property
 from pathlib import Path
+from lxml.etree import fromstring as xml
 from typing import Union, Callable, Dict, Any
+
+#======================================================================================================================
+class Credentials:
+  r"""
+An instance of this class extracts credentials recognised by Apache from the CGI context.
+  """
+#======================================================================================================================
+  ldap_user_key = 'AUTHENTICATE_SAMACCOUNTNAME'
+  ldap_group_key = 'AUTHENTICATE_MEMBEROF'
+  user_key = 'REMOTE_USER'
+  @cached_property
+  def user(self): return os.environ.get(self.user_key)
+  @cached_property
+  def ldap_user(self): return os.environ.get(self.ldap_user_key)
+  @cached_property
+  def ldap_groups(self): return {} if (groups:=os.environ.get(self.ldap_group_key)) is None else dict((g,True) for g in groups.split('; '))
 
 #======================================================================================================================
 class Accessor:
@@ -10,68 +33,65 @@ An instance of this class manages access to the xpose instances. This implementa
   """
 #======================================================================================================================
 
+  _directive:dict[str,str]
+  _check:dict[str,Callable[[Credentials],bool]]
+  _checked: dict[str,bool]
+
+  def __init__(self,directives:dict[str,str],credentials:Credentials=None):
+    def check_(directive):
+      def check_base(directive,pat=re.compile(r'^Require\s+(\S+)(?:\s+(.*))?$')):
+        if '\n' in directive: raise Exception('Single line clause expected')
+        m = pat.match(directive)
+        if m is not None: Exception('Require clause expected')
+        match m.group(1):
+          case 'user':
+            L = m.group(2).split()
+            return f'(credentials.user in ({",".join(map(repr,L))}))' if len(L)>1 else f'(credentials.user == {repr(L[0])})'
+          case 'group': return f'(credentials.groups.get({repr(m.group(2))}) is not None)'
+          case 'ldap-user':
+            L = m.group(2).split()
+            return f'(credentials.ldap_user in ({",".join(map(repr,L))}))' if L else f'(credentials.user == {repr(L[0])})'
+          case 'ldap-group': return f'(credentials.ldap_groups.get({repr(m.group(2))}) is not None)'
+          case _: Exception(f'Unsupported Require type: {m.group(1)}')
+      def check_compound(d):
+        def sub(d):
+          t = d.text.strip()
+          if t:
+            for subdirective in t.split('\n'): yield check_base(subdirective.strip())
+          for d_ in d:
+            yield check_compound(d_)
+            t = d_.tail.strip()
+            if t:
+              for subdirective in t.split('\n'): yield check_base(subdirective.strip())
+        connector = {'RequireAny':' or ','RequireAll': ' and '}.get(d.tag)
+        if connector is None: raise Exception(f'Unsupported clause connector: {d.tag}')
+        return '({})'.format(connector.join(sub(d)))
+      directive = directive.strip()
+      try: return check_compound(xml(directive)) if directive.startswith('<') else check_base(directive)
+      except: raise ValueError('Expected: Apache authorisation clause')
+    self.credentials = credentials or Credentials()
+    self._directive = directives
+    self._check = {}
+    self._checked = {}
+    for level,directive in directives.items():
+      body = check_(directive)
+      checker = eval(f'lambda credentials: {body}',{'self':self})
+      checker.__doc__ = body
+      self._check[level] = checker
+
   def authorise(self,level:str)->bool:
     r"""
 Checks whether access to an entity is authorised at *level*.
     """
-    return level is None or self.check(level)
+    if level is None: return True
+    r = self._checked.get(level)
+    if r is None: r = self._checked[level] = self._check[level](self.credentials)
+    return r
 
-  def authorise_folder(self,level:str,path:Path):
+  def authoriser(self,level:str,path:Path):
     r"""
 Restricts access to *path* at *level*.
     """
     p = path/'.htaccess'
-    if level is not None: p.parent.mkdir(parents=True, exist_ok=True);p.write_text(self.directive(level))
+    if level is not None: p.parent.mkdir(parents=True,exist_ok=True);p.write_text(self._directive[level])
     elif p.exists(): p.unlink()
-
-  def directive(self,level:str)->str:
-    # Returns the apache directive needed to restrict access to a folder at *level*.
-    raise NotImplementedError()
-
-  def check(self,level:str)->bool:
-    # Computes access authorisation at *level*. Should be equivalent to the apache directive.
-    raise NotImplementedError()
-
-#======================================================================================================================
-class FileAccessor (Accessor):
-  r"""
-An instance of this class manages access to the xpose instances using the default file-based authorisation provider type (user restrictions only, group not supported).
-  """
-#======================================================================================================================
-  def __init__(self,**ka): self._levels = dict((level,tuple(users)) for level,users in ka.items())
-  @cached_property
-  def credentials(self): return os.environ.get('REMOTE_USER')
-  @cache
-  def check(self,level:str)->bool: return self.credentials in self._levels[level]
-  def directive(self,level:str)->str: return f'Require user {" ".join(self._levels[level])}'
-
-#======================================================================================================================
-class LdapAccessor (Accessor):
-  r"""
-An instance of this class manages access to the xpose instances using the ldap-based authorisation provider type (user and group restrictions both supported).
-  """
-#======================================================================================================================
-  _check: dict[str,Callable[[],bool]]
-  _directive: dict[str,str]
-  def __init__(self,_ldap_keys=('AUTHENTICATE_SAMACCOUNTNAME','AUTHENTICATE_MEMBEROF'),**ka):
-    self.ldap_keys = _ldap_keys
-    self._check = {}; self._directive = {}
-    for level,(users,groups) in ka.items():
-      checks,directives = [],[]
-      if users:
-        checks.append(lambda: self.credentials[0] in users)
-        directives.append(f'Require ldap-user {" ".join(users)}')
-      if groups:
-        groups_ = dict((g,True) for g in groups)
-        checks.append(lambda: any(groups_.get(g) is not None for g in self.credentials[1]))
-        directives.extend(f'Require ldap-group "{g}"' for g in groups)
-      directives_ = '\n'.join(directives)
-      self._check[level] = (lambda checks=tuple(checks):any(c() for c in checks)) if len(checks)>1 else checks[0]
-      self._directive[level] = f'<RequireAny>\n{directives_}\n</RequireAny>' if len(directives)>1 else directives[0]
-  @cached_property
-  def credentials(self):
-    user_key,group_key = self.ldap_keys
-    return os.environ.get(user_key),(() if (groups:=os.environ.get(group_key)) is None else groups.split('; '))
-  @cache
-  def check(self,level:str)->bool: return self._check[level]()
-  def directive(self,level:str)->str: return self._directive[level]

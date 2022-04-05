@@ -44,28 +44,34 @@ class DetailedEventSource {
     this.el_details.className = 'calendar-details'
     calendar.el.after(this.el_details)
 
-    header.insertCell().innerHTML = '<span>Jump to: </span>'
-    const navigation = document.createElement('input')
-    header.insertCell().appendChild(navigation)
-    navigation.style.fontSize = 'inherit'
-    navigation.type = 'date'
-    navigation.addEventListener('focus',()=>{navigation.value=this.calendar.view.currentStart.toISOString().substring(0,10)},false)
-    navigation.addEventListener('blur',()=>{navigation.value=''},false)
-    navigation.addEventListener('change',()=>{if(navigation.value&&navigation.checkValidity()){this.calendar.gotoDate(navigation.value)}},false)
-    //navigation.addEventListener('change',()=>{if(navigation.value&&navigation.checkValidity()){this.calendar.gotoDate(navigation.value);navigation.value=''}},false)
-    const low = new Date(config.span.low); low.setMonth(0); low.setDate(1)
-    const high = new Date(config.span.high); high.setMonth(11); high.setDate(31)
-    navigation.min = low.toISOString().substring(0,10)
-    navigation.max = high.toISOString().substring(0,10)
-    navigation.insertAdjacentHTML('afterend',`<span> (${low.getFullYear()}-${high.getFullYear()})</span>`)
-
-    header.insertCell().innerHTML = '<span> Sources: </span>'
-    this.sources = Object.fromEntries(config.sources.map((src)=>{
-      const td = header.insertCell(); td.innerHTML = src.id
-      td.style.backgroundColor = src.options.backgroundColor ||= 'black'
-      td.style.color = src.options.textColor ||= 'white'
-      return [src.id,src]
-    }))
+    {
+      const navigation = header.insertCell()
+      const year = addElement(navigation,'select',{style:'font-size:x-small;'})
+      const month = addElement(navigation,'select',{style:'display:none;position:absolute;z-index:100;font-size:x-small;',size:12})
+      addElement(year,'option',{selected:'selected'}).innerText = 'Jump to...'
+      month.addEventListener('blur',()=>{year.selectedIndex=0;month.style.display='none'})
+      for (let y=config.span[1];y>=config.span[0];y--) {
+        const o = addElement(year,'option')
+        o.innerText = String(y)
+        o.addEventListener('click',()=>{month.style.display='';month.selectedIndex=-1;month.focus()})
+      }
+      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach((m,i)=>{
+        const o = addElement(month,'option',{value:String(i+1).padStart(2,'0'),style:'background-color:white;color:black;'})
+        o.innerText = m
+        o.addEventListener('mouseenter',()=>{o.style.filter='invert(100%)'})
+        o.addEventListener('mouseleave',()=>{o.style.filter='invert(0%)'})
+        o.addEventListener('click',()=>{calendar.gotoDate(`${year.selectedOptions[0].value}-${o.value}-01`);year.selectedIndex=0;month.style.display='none'})
+      })
+    }
+    {
+      header.insertCell().innerHTML = '<span> Sources: </span>'
+      this.sources = Object.fromEntries(config.sources.map((src)=>{
+        const td = header.insertCell(); td.innerHTML = src.id
+        td.style.backgroundColor = src.options.backgroundColor ||= 'black'
+        td.style.color = src.options.textColor ||= 'white'
+        return [src.id,src]
+      }))
+    }
 
     for (const h of (config.headers||[])) { header.insertCell().innerHTML = h }
 
@@ -134,4 +140,11 @@ class DetailedEventSource {
     const m = t.getMinutes()
     return `${1+((t.getHours()-1)%12+12)%12}${m?':'+String(m).padStart(2,'0'):''}${t.getHours()<12?'am':'pm'}`
   }
+}
+
+function addElement(container,tag,attrs) {
+	const el = document.createElement(tag)
+	if (attrs) { for (const [k,v] of Object.entries(attrs)) {el.setAttribute(k,v)} }
+	container.appendChild(el)
+	return el
 }

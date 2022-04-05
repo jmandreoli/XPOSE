@@ -41,19 +41,22 @@ For each category ``{cat}``, the following files are expected in folder ``cats``
 * ``cats/{cat}/schema.json``: `json schema <https://json-schema.org/>`_ describing the entries of category {cat}
 * ``cats/{cat}/init.py``: python file initialising category {cat} on server (run once for each version of the xpose instance)
 * ``cats/{cat}/{*}`` (optional): utility files for category {cat}, esp. `genshi templates <https://genshi.edgewall.org/>`_
+
+The following sqlite functions are made available in contexts where they are needed:
+
+* :func:`create_attach`(oid,attach): called when an entry is created to set its ``attach`` field in the index, given its ``oid`` and ``attach`` fields (the latter is overridden)
+* :func:`delete_attach`(oid): called when an entry with a given ``oid`` field is deleted
+* :func:`authorise`(level): controls access to an entry given its level (field ``access`` in the index)
+* :func:`apply_template`(tmpl,err_tmpl,rendering,args): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
 """
 
-import sys,os,sqlite3,shutil,json,re,traceback,dill as pickle
-from functools import cached_property, cache, singledispatch
-from datetime import datetime
+import os,sqlite3,json
+from urllib.parse import parse_qsl
+from functools import cached_property
 from pathlib import Path
-from http import HTTPStatus
-from urllib.parse import parse_qsl,urljoin
 from typing import Union, Callable, Dict, Any
-from enum import Enum
-from attach import Attach
-from access import Accessor
-from utils import rebase,CGIMixin,http_ts
+from .utils import CGIMixin, rebase, http_ts
+from .utils import get_config,set_config # not used, but made available
 if not hasattr(Path,'hardlink_to'): Path.hardlink_to = lambda self,target: Path(target).link_to(self) # fixes a compatibility issue, useless in python 3.10+
 #sqlite3.register_converter('json',json.loads)
 
@@ -68,43 +71,18 @@ An instances of this base class is a resource for processing Xpose operations. A
   r"""Path to the root folder"""
   index_db: Path
   r"""Path to the index database"""
-  attach: 'Attach'
-  r"""Object managing the attachments associated to this instance"""
-  cats: 'Cats'
-  r"""Object managing the categories associated to this instance"""
-  attach_namer:Any
-  r"""Object implementing the encoding-decoding of entry ids"""
-  accessor:Accessor
-  r"""Object controlling access to this instance"""
 
-  def __init__(self,root:Union[str,Path]='.',attach_namer=None,accessor=None):
-    self.root = root = Path(root).resolve()
-    self.accessor = accessor
-    self.attach = Attach((root/'attach').resolve(),attach_namer)
-    self.cats = Cats((root/'cats').resolve())
-    self.index_db = (root/'index.db').resolve()
+  def __init__(self,root:Union[str,Path]='.'):
+    self.root = Path(root).resolve()
+    self.index_db = self.root/'index.db'
 
 #----------------------------------------------------------------------------------------------------------------------
   def connect(self,**ka):
     r"""
-Returns a :class:`sqlite3.Connection` opened on the index database. The keyword arguments *ka* are passed as such to the connection constructor. Two user defined sqlite functions are made available:
-
-* :func:`create_attach` (arity 2): called when an entry is created to set its ``attach`` field in the index, given its ``oid`` and ``attach`` fields (the latter is overridden)
-* :func:`delete_attach` (arity 1): called when an entry is deleted
-* :func:`authorise` (arity 1): controls access to an entry given its level (field ``access`` in the index)
-* :func:`apply_template` (arity 4): invokes method :meth:`apply_template` on the object held by the :attr:`cats` attribute; variable ``xpose`` denotes this instance
+Returns a :class:`sqlite3.Connection` opened on the index database. The keyword arguments *ka* are passed as such to the connection constructor.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    conn = sqlite3.connect(self.index_db,**ka)
-    conn.create_function('create_attach',2,(lambda oid,attach,convert=self.attach.namer.int2str:convert(oid)))
-    conn.create_function('delete_attach',1,(lambda attach,rmdir=self.attach.rmdir:rmdir(attach,True)))
-    conn.create_function('authorise',1,self.accessor.authorise)
-    conn.create_function('xpose_template',4,(lambda tmpl,err_tmpl,rendering,args,t=self.cats.apply_template:t(tmpl,err_tmpl,rendering,xpose=self,**json.loads(args))))
-    return conn
-
-  @cached_property
-  def url_base(self): return Path('/'+str(self.root.relative_to(os.environ['DOCUMENT_ROOT'])))
-  def rebase(self,x:str,path:Union[str,Path]): return rebase(x,str(self.url_base/'attach'/path/'_'))
+    return sqlite3.connect(self.index_db,**ka)
 
 #======================================================================================================================
 class XposeClient (XposeBase,CGIMixin):
@@ -112,9 +90,23 @@ class XposeClient (XposeBase,CGIMixin):
 An instance of this class is a CGI resource managing (restricted) client access to the Xpose index database through prepared SQL queries.
   """
 #======================================================================================================================
-  def __init__(self,prepared:Dict[str,tuple[str,...]]=None,**ka):
+
+  cats: 'Cats'
+  r"""Object managing the categories associated to this instance"""
+  authorise: Callable[[str],bool]
+  r"""Function controlling access to the entries of this instance"""
+
+  def __init__(self,authorise=None,prepared:Dict[str,tuple[str,...]]=None,**ka):
     super().__init__(**ka)
+    self.authorise = authorise
     self.prepared = prepared or {}
+    self.cats = Cats(self.root/'cats')
+
+  def connect(self,**ka):
+    conn = super().connect(**ka)
+    conn.create_function('authorise',1,self.authorise)
+    conn.create_function('xpose_template',4,(lambda tmpl,err_tmpl,rendering,args,t=self.cats.apply_template:t(tmpl,err_tmpl,rendering,xpose=self,**json.loads(args))))
+    return conn
 
   def do_get(self):
     form = dict(parse_qsl(os.environ['QUERY_STRING']))
@@ -124,6 +116,10 @@ An instance of this class is a CGI resource managing (restricted) client access 
       conn.row_factory = sqlite3.Row
       resp = [dict(r) for r in conn.execute(sql,args).fetchall()]
       return json.dumps(resp), {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
+
+  @cached_property
+  def url_base(self): return Path('/'+str(self.root.relative_to(os.environ['DOCUMENT_ROOT'])))
+  def rebase(self,x:str,path:Union[str,Path]): return rebase(x,str(self.url_base/'attach'/path/'_'))
 
 #======================================================================================================================
 class Cats:
