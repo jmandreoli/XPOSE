@@ -9,17 +9,14 @@
 //
 
 class Xpose {
-  constructor (url) {
+  constructor (url,views) {
     this.url = url
-    this.views = {}
     this.current = null
     this.dirty = false
     this.variant = (document.cookie.split('; ').find(row=>row.startsWith('xpose-variant='))||'').substr(14)
-    this.addView('console',new consoleView())
-    this.addView('listing',new listingView())
-    this.addView('entry',new entryView())
-    this.addView('attach',new attachView())
-    this.addView('manage',new manageView())
+    views = views||{}
+    const default_views = { console:consoleView, listing:listingView, entry:entryView, attach:attachView, manage:manageView }
+    for (const [name,default_factory] of Object.entries(default_views)) { this.addView(name,new (views[name]||default_factory)()) }
     window.addEventListener('beforeunload',(e)=>{ if (this.dirty) {e.preventDefault();e.returnValue=''} })
   }
   addView (name,view) {
@@ -656,7 +653,6 @@ function addJButton(container,icon,attrs) {
 function addText(container,data) {
   const text = document.createTextNode(data||' ')
   container.appendChild(text)
-  return container
 }
 function toggle_display (el) { el.style.display = (el.style.display?'':'none') }
 function unsavedConfirm () { return window.confirm('Unsaved changes will be lost. Are you sure you want to proceed ?') }

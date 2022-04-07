@@ -4,11 +4,9 @@
 # Purpose:              Xpose: instance management operations
 #
 
-import os,sys,sqlite3,shutil,json,traceback,dill as pickle
-from functools import cached_property
+import sys,sqlite3,shutil,json,traceback
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import parse_qsl
 from typing import Union, Callable, Dict, Any
 from . import XposeBase, Cats
 from .attach import Attach
@@ -218,7 +216,7 @@ No input expected.
       user_version += 1
     # initialise mirror root and load entry listing
     initial(mirror,cfg,user_version,preserve).load(listing)
-    return json.dumps({'transfered':len(listing)}),{'Content-Type':'text/json'}
+    return json.dumps({'transferred':len(listing)}),{'Content-Type':'text/json'}
 
 #======================================================================================================================
 class XposeInit (XposeBase,CGIMixin):
