@@ -2,7 +2,7 @@ h1 { background-color: black; color: white; }
 .listing td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
 .listing td:hover { background-color: lavender; }
 .caution { border: thin solid red; }
-.xpose-variant-warning { position:fixed; background-color: lavender; top:50%; left: 50%; border: thin solid red; padding:2mm; font-size: xx-large; text-align: center; z-index:1000; }
+.xpose-variant-warning { position:fixed; bottom:0; left:0; right:0; background-color: orange; opacity: 80%; padding:2mm; font-size: xx-large; text-align: center; z-index:1000; }
 .attach td { border: thin solid black; padding-left:1mm; padding-right:1mm; }
 .manage-stats { empty-cells: show; border-collapse: collapse; }
 .manage-stats td { border: thin solid black; }
