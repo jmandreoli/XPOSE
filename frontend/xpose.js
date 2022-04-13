@@ -78,7 +78,7 @@ class Xpose {
   toggle_variant () { document.cookie=`xpose-variant=${this.variant?'':'shadow'}`;window.location.reload() }
   render() {
     {
-      this.el_progress = addElement(document.body,'div',{class:'xpose-progress',style:'display:none'})
+      this.el_progress = addElement(document.body,'div',{class:'xpose-progress'})
     }
     {
       const h1 = addElement(document.body,'h1')

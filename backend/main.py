@@ -4,39 +4,34 @@
 # Purpose:              Xpose: index database operations
 #
 
-import sys,os,sqlite3,json
+import sqlite3,json
 from datetime import datetime
 from pathlib import Path
 from http import HTTPStatus
-from urllib.parse import parse_qsl
 from typing import Union, Callable, Dict, Any
 from . import XposeBase
-from .attach import Attach
-from .utils import CGIMixin,http_raise,http_ts,parse_input
+from .attach import WithAttachMixin
+from .utils import CGIMixin,http_raise,http_ts
 
 #======================================================================================================================
-class XposeMain (XposeBase,CGIMixin):
+class XposeMain (XposeBase,WithAttachMixin,CGIMixin):
   r"""
 An instance of this class is a CGI resource managing the Xpose index database.
   """
 #======================================================================================================================
 
-  attach: 'Attach'
-  r"""Object managing the attachments associated to this instance"""
   attach_namer: Callable[[int],str]
   r"""Function mapping an oid into a (relative) folder pathname"""
   authoriser: Callable[[str,Path],None]
   r"""Function setting the access authorisation level for a folder"""
-
   sql_oid = '''SELECT oid,version,cat,Short.value as short,Entry.value as value,attach,access
     FROM Entry LEFT JOIN Short ON Short.entry=oid
     WHERE oid=?'''
+  r"""The SQL query to retrieve an entry given its oid"""
 
   def __init__(self,authoriser=None,attach_namer=None,**ka):
-    super().__init__(**ka)
     self.authoriser = authoriser
     self.attach_namer = attach_namer
-    self.attach = Attach(self.root/'attach')
 
   def connect(self,**ka):
     conn = super().connect(**ka)
@@ -57,8 +52,8 @@ Input is expected as an (encoded) form with a single field. The field must be ei
     def select_all(*a):
       with self.connect() as conn:
         conn.row_factory = sqlite3.Row
-        return [dict(r) for r in conn.execute(*a).fetchall()], self.index_db.stat().st_mtime
-    form = dict(parse_qsl(os.environ['QUERY_STRING']))
+        return [dict(r) for r in conn.execute(*a)], self.index_db.stat().st_mtime
+    form = self.parse_qsl()
     resp,ts = '',None
     if (sql:=form.get('sql')) is not None:
       sql = sql.strip()
@@ -75,24 +70,12 @@ Input is expected as an (encoded) form with a single field. The field must be ei
     return resp, {'Content-Type':'text/json','Last-Modified':http_ts(ts)}
 
 #----------------------------------------------------------------------------------------------------------------------
-  def do_post(self):
-    r"""
-Input is expected as a JSON encoded object with a single field ``sql``, which must denote an arbitrary SQLite script.
-    """
-#----------------------------------------------------------------------------------------------------------------------
-    form = parse_input()
-    sql = form['sql'].strip()
-    with self.connect() as conn:
-      c = conn.executescript(sql)
-      return dict(total_changes=conn.total_change,lastrowid=c.lastrowid), {'Content-Type':'text/json'}
-
-#----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     r"""
 Input is expected as any JSON encoded entry. Validation is not performed.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    entry = parse_input()
+    entry = self.parse_input()
     oid,version,access,value = entry.get('oid'),entry.get('version'),entry['access'],json.dumps(entry['value'])
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if oid is None:
@@ -114,26 +97,22 @@ Input is expected as any JSON encoded entry. Validation is not performed.
 Input is expected as a JSON encoded object with a single field ``oid``, which must denote the primary key of an Entry.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    oid = parse_input()['oid']
+    oid = self.parse_input()['oid']
     with self.connect() as conn: conn.execute('DELETE FROM Entry WHERE oid=?',(oid,))
     return json.dumps({'oid':oid}), {'Content-Type':'text/json'}
 
-#----------------------------------------------------------------------------------------------------------------------
-  def do_head(self):
-#----------------------------------------------------------------------------------------------------------------------
-    http_raise(HTTPStatus.NOT_IMPLEMENTED)
-
 #======================================================================================================================
-class XposeAttach (XposeBase,CGIMixin):
+class XposeAttach (XposeBase,WithAttachMixin,CGIMixin):
   r"""
 An instance of this class is a CGI resource managing the Xpose attachment folder.
   """
 #======================================================================================================================
 
-  def __init__(self,chunk:int=0x100000,**ka):
-    super().__init__(**ka)
+  chunk: int
+  r"""Controls the chunk size for file upload"""
+
+  def __init__(self,chunk:int=0x100000):
     self.chunk = chunk
-    self.attach = Attach(self.root/'attach')
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
@@ -141,7 +120,7 @@ An instance of this class is a CGI resource managing the Xpose attachment folder
 Input is expected as an (encoded) form with a single field ``path``.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    form = dict(parse_qsl(os.environ['QUERY_STRING']))
+    form = self.parse_qsl()
     path,level = self.attach.getpath(form['path'])
     content = self.attach.ls(path)
     if level==0: content = [x for x in content if not x[0].endswith('.htaccess')] # XXXX specific to one authoriser, may use .xpose-hide-filename
@@ -153,7 +132,7 @@ Input is expected as an (encoded) form with a single field ``path``.
 Input is expected as a JSON encoded object with fields ``path``, ``version`` and ``ops``, the latter being a list of operations. An operation is specified as an object with fields ``src``, ``trg`` (relative paths) and ``is_new`` (boolean).
     """
 #----------------------------------------------------------------------------------------------------------------------
-    content = parse_input()
+    content = self.parse_input()
     path,version,ops = content['path'],content['version'],content['ops']
     with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations, no transaction is performed
       path,level = self.attach.getpath(path)
@@ -169,10 +148,9 @@ Input is expected as a JSON encoded object with fields ``path``, ``version`` and
 Input is expected as an octet stream.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    form = dict(parse_qsl(os.environ['QUERY_STRING']))
-    target = form.get('target')
-    assert os.environ['CONTENT_TYPE'] == 'application/octet-stream'
-    res = self.attach.upload(sys.stdin.buffer,int(os.environ['CONTENT_LENGTH']),target,chunk=self.chunk)
+    form = self.parse_qsl()
+    it = self.parse_input('application/octet-stream',chunk=self.chunk)
+    res = self.attach.upload(it,form.get('target'))
     content = dict(zip(('name','mtime','size'),res))
     return json.dumps(content), {'Content-Type':'text/json'}
 

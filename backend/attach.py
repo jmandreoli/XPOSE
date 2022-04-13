@@ -5,6 +5,7 @@
 #
 
 import shutil
+from functools import cached_property
 from pathlib import Path
 from datetime import datetime
 from typing import Union, Callable, Dict, Any
@@ -67,7 +68,21 @@ An instance of this class manages an xpose instance's attachments (field ``attac
     shutil.rmtree(self.root/path)
 
 #----------------------------------------------------------------------------------------------------------------------
-  def upload(self,buf,size:int,target,chunk:int):
+  def upload(self,it,target):
+#----------------------------------------------------------------------------------------------------------------------
+    from tempfile import NamedTemporaryFile
+    upload_dir = self.root/'.uploaded'
+    if it is None: (upload_dir/target).unlink(); return
+    with ((upload_dir/target).open('ab') if target else NamedTemporaryFile('wb',dir=upload_dir,prefix='',delete=False)) as v:
+      f = Path(v.name)
+      try:
+        for x in it: v.write(x)
+      except: f.unlink(); raise
+    s = f.stat()
+    return f.name,datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds'),s.st_size
+
+#----------------------------------------------------------------------------------------------------------------------
+  def upload1(self,buf,size:int,target,chunk:int):
 #----------------------------------------------------------------------------------------------------------------------
     from tempfile import NamedTemporaryFile
     upload_dir = self.root/'.uploaded'
@@ -84,3 +99,10 @@ An instance of this class manages an xpose instance's attachments (field ``attac
       except: f.unlink(); raise
     s = f.stat()
     return f.name,datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds'),s.st_size
+
+#======================================================================================================================
+class WithAttachMixin:
+#======================================================================================================================
+  root:Path
+  @cached_property
+  def attach(self)->Attach: return Attach(self.root/'attach')

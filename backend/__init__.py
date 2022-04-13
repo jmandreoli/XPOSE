@@ -50,11 +50,10 @@ The following sqlite functions are made available in contexts where they are nee
 * :func:`apply_template`(tmpl,err_tmpl,rendering,args): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
 """
 
-import os,sqlite3,json
-from urllib.parse import parse_qsl
+import sqlite3,json
 from functools import cached_property
 from pathlib import Path
-from typing import Union, Callable, Dict, Any
+from typing import Optional, Union, Callable, Dict, Any
 from .utils import CGIMixin, rebase, http_ts
 from .utils import get_config,set_config # not used, but made available
 if not hasattr(Path,'hardlink_to'): Path.hardlink_to = lambda self,target: Path(target).link_to(self) # fixes a compatibility issue, useless in python 3.10+
@@ -72,9 +71,10 @@ An instances of this base class is a resource for processing Xpose operations. A
   index_db: Path
   r"""Path to the index database"""
 
-  def __init__(self,root:Union[str,Path]='.'):
-    self.root = Path(root).resolve()
+  def setup(self,path:Union[str,Path]='.'):
+    self.root = Path(path).resolve()
     self.index_db = self.root/'index.db'
+    return self
 
 #----------------------------------------------------------------------------------------------------------------------
   def connect(self,**ka):
@@ -85,22 +85,27 @@ Returns a :class:`sqlite3.Connection` opened on the index database. The keyword 
     return sqlite3.connect(self.index_db,**ka)
 
 #======================================================================================================================
-class XposeClient (XposeBase,CGIMixin):
+class WithCatsMixin:
+#======================================================================================================================
+  root: Path
+  @cached_property
+  def cats(self)->'Cats': return Cats(self.root/'cats')
+
+#======================================================================================================================
+class XposeClient (XposeBase,WithCatsMixin,CGIMixin):
   r"""
 An instance of this class is a CGI resource managing (restricted) client access to the Xpose index database through prepared SQL queries.
   """
 #======================================================================================================================
 
-  cats: 'Cats'
-  r"""Object managing the categories associated to this instance"""
   authorise: Callable[[str],bool]
   r"""Function controlling access to the entries of this instance"""
+  prepared: dict[str,tuple[str,...]]
+  r"""Mapping query names to actual SQL queries (with variables)"""
 
-  def __init__(self,authorise=None,prepared:Dict[str,tuple[str,...]]=None,**ka):
-    super().__init__(**ka)
+  def __init__(self,authorise=(lambda level: False),prepared:Dict[str,tuple[str,...]]={}):
     self.authorise = authorise
-    self.prepared = prepared or {}
-    self.cats = Cats(self.root/'cats')
+    self.prepared = prepared
 
   def connect(self,**ka):
     conn = super().connect(**ka)
@@ -109,7 +114,7 @@ An instance of this class is a CGI resource managing (restricted) client access 
     return conn
 
   def do_get(self):
-    form = dict(parse_qsl(os.environ['QUERY_STRING']))
+    form = self.parse_qsl()
     sql,*args = self.prepared[form['sql']]
     args = tuple(map(form.get,args))
     with self.connect() as conn:
@@ -118,7 +123,7 @@ An instance of this class is a CGI resource managing (restricted) client access 
       return json.dumps(resp), {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
 
   @cached_property
-  def url_base(self): return Path('/'+str(self.root.relative_to(os.environ['DOCUMENT_ROOT'])))
+  def url_base(self): return self.from_server_root(self.root)
   def rebase(self,x:str,path:Union[str,Path]): return rebase(x,str(self.url_base/'attach'/path/'_'))
 
 #======================================================================================================================

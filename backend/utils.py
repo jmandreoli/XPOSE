@@ -37,10 +37,42 @@ A simple helper mixin that simplifies writing CGI resource classes. A resource c
     print()
     print(content,flush=True)
 
+  @staticmethod
+  def from_server_root(path:Path)->Path:
+    return Path('/'+str(path.relative_to(os.environ['DOCUMENT_ROOT'])))
+
+  @staticmethod
+  def parse_input(mime:str='application/json',chunk:int=None):
+    def read(n):
+      while n>0:
+        t = sys.stdin.buffer.read(n)
+        m = len(t)
+        if m == 0: raise EOFError()
+        yield t
+        n -= m
+    def chunk_read(n):
+      while n>0:
+        m = min(n,chunk)
+        yield from read(m)
+        n -= m
+    def merge(it): return b''.join(it).decode()
+    assert os.environ['CONTENT_TYPE'].startswith(mime)
+    n = int(os.environ['CONTENT_LENGTH'])
+    Transf = {
+      'application/json': (lambda it: json.loads(merge(it))),
+      'application/x-www-form-urlencoded': (lambda it: dict(parse_qsl(merge(it)))), # unsophisticated: no multiple values per key
+      'application/octet-stream': (lambda it: it),
+    }
+    return Transf[mime]((read if chunk is None else chunk_read)(n) if n>0 else None)
+
+  @staticmethod
+  def parse_qsl()->dict[str,str]:
+    return dict(parse_qsl(os.environ['QUERY_STRING']))
+
 #======================================================================================================================
 class IntStrConverter:
   r"""
-An instance of this class is a 1-1 mapping between the interval of whole numbers from 0 (inclusive) to 0x100000 (exclusive) and a set of strings of the form \*\*/\*\* (each \* being a character in *symbols*). Suitable for defining attachment paths. Example::
+An instance of this class is a bijection between the interval of whole numbers from 0 (inclusive) to 0x100000 (exclusive) and the set of strings of length 4 of characters in *symbols*. Suitable for defining attachment paths. Example::
 
    c = IntStrConverter() # all parameters are initialised randomly
    L = list(range(0x100000))
@@ -48,7 +80,7 @@ An instance of this class is a 1-1 mapping between the interval of whole numbers
 
 :param shift: any integer
 :param perm: a permutation of (0,...,19)
-:param symbols: a string of length 32 where each character occurs only once and is allowed in a filename
+:param symbols: a string of length 32 where each character occurs only once
   """
 #======================================================================================================================
   shift : int
@@ -80,15 +112,14 @@ An instance of this class is a 1-1 mapping between the interval of whole numbers
     n = (n+self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
     x = f'{n:020b}' # convert: 20-bit-int -> 20-bit-str
     x = ''.join(x[i] for i in self.perm) # permute: 20-bit-str -> 20-bit-str
-    x = ''.join(self.symbols[x[i:i+5]] for i in range(0,20,5)) # segment: 20-bit-str -> 4-symbol-str
-    return f'{x[:2]}/{x[-2:]}'
+    return ''.join(self.symbols[x[i:i+5]] for i in range(0,20,5)) # segment: 20-bit-str -> 4-symbol-str
 
 #----------------------------------------------------------------------------------------------------------------------
   def str2int(self,x:str)->int:
     r""":param x: value to convert"""
 #----------------------------------------------------------------------------------------------------------------------
-    #assert isinstance(x,str) and len(x)==5 and x[2] == '/' and all(u in self.symbols_ for t in (x[:2],x[-2:]) for u in t)
-    x = ''.join(self.symbols_[u] for t in (x[:2],x[-2:]) for u in t) # segment: 4-symbol-str -> 20-bit-str
+    #assert isinstance(x,str) and len(x)==4 and all(u in self.symbols_ for u in x)
+    x = ''.join(self.symbols_[u] for u in x) # segment: 4-symbol-str -> 20-bit-str
     x = ''.join(x[i] for i in self.perm_) # permute: 20-bit-str -> 20-bit-str
     n = int(x,2) # convert: 20-bit-str -> 20-bit-int
     return (n-self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
@@ -101,21 +132,6 @@ class HTTPException (Exception):
   def __init__(self,status:HTTPStatus): self.status = status
 def http_raise(status): raise HTTPException(status)
 def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
-
-def parse_input(mime:str='application/json',transf:bool=True):
-  assert os.environ['CONTENT_TYPE'].startswith(mime)
-  n = int(os.environ['CONTENT_LENGTH'])
-  x = []
-  while n>0:
-    t = sys.stdin.buffer.read(n); m = len(t)
-    if m==0: raise EOFError()
-    x.append(t)
-    n -= m
-  r:Any = b''.join(x).decode() # default (utf-8) encoding used; should be parsed from parameters in CONTENT_TYPE header
-  if transf:
-    if mime == 'application/json': r = json.loads(r)
-    elif mime == 'application/x-www-form-urlencoded': r = dict(parse_qsl(r)) # very basic, no multiple values with same field
-  return r
 
 def set_config(path,**ka):
   for key,cfg in ka.items():

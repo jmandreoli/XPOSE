@@ -3,14 +3,12 @@
 # Language:             python
 # Purpose:              Xpose: instance management operations
 #
-
 import sys,sqlite3,shutil,json,traceback
-from datetime import datetime
 from pathlib import Path
-from typing import Union, Callable, Dict, Any
-from . import XposeBase, Cats
-from .attach import Attach
-from .utils import CGIMixin,http_raise,http_ts,parse_input,set_config,get_config
+from typing import Union, Callable, Any, Optional
+from . import XposeBase, WithCatsMixin
+from .attach import WithAttachMixin
+from .utils import CGIMixin,http_raise,http_ts,set_config,get_config
 
 XposeSchema = '''
 CREATE TABLE Entry (
@@ -49,35 +47,40 @@ CREATE TRIGGER ShortTriggerBeforeUpdate BEFORE UPDATE OF value ON Entry
   BEGIN DELETE FROM Short WHERE entry=OLD.oid; END;
 '''
 
+RoutingCode = f'''#!{sys.executable}
+from os import environ, umask
+from http.cookies import SimpleCookie
+from pathlib import Path
+from xpose import get_config
+umask(0o7)
+variant = '.' if (morsel:=SimpleCookie(environ.get('HTTP_COOKIE','')).get('xpose-variant')) is None else morsel.coded_value
+path = Path(__file__).resolve().parent/variant
+get_config(path/'.routes',environ['PATH_INFO'][1:]).setup(path).process_cgi()'''
+
 #======================================================================================================================
-class XposeServer (XposeBase,CGIMixin):
+class XposeServer (XposeBase,WithCatsMixin,WithAttachMixin,CGIMixin):
   r"""
 An instance of this class provides various management operations on an Xpose instance.
   """
 #======================================================================================================================
 
-  def __init__(self,authoriser=None,attach_namer=None,**ka):
-    super().__init__(**ka)
+  authoriser: Callable[[str,Path],None]
+  r"""Applies an access level control to a path"""
+
+  def __init__(self,authoriser=None,attach_namer=None):
     self.authoriser = authoriser
     self.attach_namer = attach_namer
-    self.attach = Attach(self.root/'attach')
-    self.cats = Cats(self.root/'cats')
 
 #----------------------------------------------------------------------------------------------------------------------
-  def load(self,content:Union[str,Path,list],with_oid:bool=False):
+  def load(self,contents:Union[list,str,Path],with_oid:bool=False):
     r"""
-Loads some entries in the index database. Entries are validated, and behaviour is transactional. If *with_oid* is :const:`True` (resp. :const:`False`), the entries must have (resp. not have) an ``oid`` field. If present, the ``oid`` field must of course be different from any existing one (an error is raised otherwise). Furthermore, the ``attach`` field must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that folders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
+Loads some entries in the index database. Entries are validated, and behaviour is transactional. If *with_oid* is :const:`True` (resp. :const:`False`), the entries must have (resp. must not have) an ``oid`` field. If present, the ``oid`` field must of course be different from any existing one (abort otherwise). Furthermore, the ``attach`` field must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that subfolders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
 
-:param content: the list of entries to load into the index database, or a path to a json file containing that list under key ``listing`` (consistent with method :meth:`dump`)
-:param with_oid: whether the entries contain their ``oid`` key
+:param contents: the list of entries to load into the index database, or a path to a json file as obtained by method :meth:`dump`
+:param with_oid: whether the entries should be stored with the oid as specified in *contents*
     """
 #----------------------------------------------------------------------------------------------------------------------
-    def get_fields(conn):
-      cur = conn.execute('PRAGMA table_info(Entry)')
-      n, = (n for n,d in enumerate(cur.description) if d[0]=='name')
-      fields = [x[n] for x in cur]
-      cur.close()
-      return fields
+    attach_info:dict[str,dict[str,str]] = {}
     def entry(row,i):
       assert set(row) == field_set, set(row)^field_set
       value = row['value']
@@ -85,11 +88,11 @@ Loads some entries in the index database. Entries are validated, and behaviour i
       row['value'] = json.dumps(value)
       memo = row['memo']
       row['memo'] = None if memo is None else json.dumps(memo)
-      a = f'{i:04x}'; a = f'{a[:2]}/{a[2:]}' # arbitrary 1-1 encoding of i
-      Info[a] = row['attach']; row['attach'] = a
+      a = f'{i:04x}'; a = f'{a[:2]}/{a[-2:]}' # local encoding of i
+      attach_info[a] = row['attach']; row['attach'] = a
       return tuple(row[f] for f in fields)
     def create_attach(oid,a,namer=self.attach_namer,root=self.attach.root):
-      a = Info[a]
+      a = attach_info[a]
       attach = namer(oid)
       if a is not None:
         try:
@@ -100,26 +103,27 @@ Loads some entries in the index database. Entries are validated, and behaviour i
         except:
           traceback.print_exc(file=sys.stderr); raise
       return attach
-    if isinstance(content,list): listing = content
+    assert isinstance(with_oid,bool)
+    if isinstance(contents,list): listing = contents
     else:
-      with open(content) as u: listing = json.load(u)['listing']
+      with open(contents) as u: listing = json.load(u)['listing']
     with self.connect() as conn:
-      conn.create_function('create_attach',2,create_attach) # overrides the default
+      conn.row_factory = sqlite3.Row
+      conn.create_function('create_attach',2,create_attach) # not the default
       conn.create_function('authoriser',2,(lambda access,attach,auth=self.authoriser,root=self.attach.root: auth(access,root/attach)))
-      fields = get_fields(conn)
-      if not with_oid: fields.remove('oid')
+      cur = conn.execute('PRAGMA table_info(Entry)'); fields = [x['name'] for x in cur]; cur.close()
+      if with_oid is False: fields.remove('oid')
       field_set = set(fields)
       sql = f'INSERT INTO Entry ({",".join(fields)}) VALUES ({",".join(len(fields)*["?"])})'
-      Info:Dict[str,dict] = {}
       listing = [entry(row,i) for i,row in enumerate(listing)]
       conn.executemany(sql,listing)
 
 #----------------------------------------------------------------------------------------------------------------------
-  def dump(self,clause:str=None,with_oid:bool=False,path:Union[str,Path]=None):
+  def dump(self,path:Union[str,Path]=None,clause:str=None,with_oid:bool=False):
     r"""
 Extracts a list of entries from the index database. If *with_oid* is :const:`True` (resp. :const:`False`), the entries will have (resp. not have) an ``oid`` field. Furthermore, the ``attach`` field has the same form as in :meth:`load`.
 
-:param path: if not :const:`None`, the extracted list is dumped into a json file at *path* (under key ``listing``) and :const:`None` is returned
+:param path: if specified, the extracted entries, with meta-data, are dumped into a json file, otherwise they are returned
 :param clause: specifies extra SQL clauses (WHERE, ORDER BY, LIMIT...) to extract the entries (if absent, all the entries are extracted)
 :param with_oid: if :const:`True`, the entries will include their ``oid`` key
     """
@@ -137,10 +141,11 @@ Extracts a list of entries from the index database. If *with_oid* is :const:`Tru
       conn.row_factory = sqlite3.Row
       listing = list(map(trans,conn.execute(f'SELECT * FROM Entry{clause_}').fetchall()))
       user_version, = conn.execute('PRAGMA user_version').fetchone()
-      ts = datetime.now().isoformat(timespec='seconds')
-    if path is None: return listing
-    with open(path,'w') as v:
-      json.dump({'meta':{'origin':'XposeDump','timestamp':ts,'root':str(self.root),'clause':clause,'user_version':user_version},'listing':listing},v,indent=1)
+      ts = self.index_db.stat().st_mtime
+    R = {'meta':{'origin':'XposeDump','clause':clause,'with_oid':with_oid,'timestamp':ts,'root':str(self.root),'user_version':user_version},'listing':listing}
+    if path is None: return R
+    else:
+      with open(path,'w') as v: json.dump(R,v)
 
 #----------------------------------------------------------------------------------------------------------------------
   def precompute_trigger(self,table:str,cat:str,defn:str,when:str=None):
@@ -191,63 +196,92 @@ No input expected.
 #----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
     r"""
-No input expected.
+No input expected. Three phases:
+* Phase 1: real->shadow instance
+  * when self contains "shadow" directory and "config.py" file: self is the real instance, target=shadow
+* Phase 2: shadow->real instance
+  * when self does not contain "shadow" directory nor "config.py" file: self is the shadow instance, target=real
+* Phase 0: real->real (only for initialisation - or re-initialisation)
+  * when self does not contain "shadow" directory but contains "config.py" file
+  * requires only files "config.py"
+Components of
+* both instances:
+  * index.db: index database file
+  * attach: attachment directory
+  * .routes: route directory
+* real instance:
+  * config.py: symlink to readable python file containing configuration code
+  * route.py: generated python file for cgi-bin script to symlink to
+  * cats: fixed copy of cats directory from config, only updated in Phase 2
+* shadow instance:
+  * cats: symlink to directory from config
     """
 #----------------------------------------------------------------------------------------------------------------------
-    preserve = ()
-    if self.root.name == 'shadow': # self is the shadow instance; mirror is the real instance
-      mirror = self.root.parent
-      upgrader = mirror/'upgrader.py'
-      preserve = (self.root,upgrader) # in mirror (real)
-    else: # self is the real instance; mirror is the shadow instance
-      upgrader = self.root/'upgrader.py'
-      mirror = self.root/'shadow'
-      cats = mirror/'cats'
-      if not cats.exists(): cats.touch() # just to make sure it is there; will be replaced by appropriate symlink
-      preserve = (cats,) # in mirror (shadow)
-    upgrade = {}; exec(upgrader.read_text(),upgrade)
-    # collect self entries
-    with self.connect() as conn: user_version, = conn.execute('PRAGMA user_version').fetchone()
-    listing = self.dump()
+    from .main import XposeMain,XposeAttach
+    config_ = self.root/'config.py'
+    shadow_ = self.root/'shadow'
+    self_is_configured = config_.exists()
+    target_is_shadow = self_is_configured is True and shadow_.exists()
+    if target_is_shadow is True: # Phase 1
+      target = shadow_; preserve = ()
+    else: # target is real, caution
+      if self_is_configured is True: # Phase 0
+        target = self.root; shadow_.mkdir()
+        with self.connect() as conn: conn.executescript(XposeSchema) # create empty index for dump, but will be removed
+      else: # Phase 2
+        assert self.root.name == 'shadow'
+        shadow_ = self.root; target = shadow_.parent; config_ = target/'config.py'; assert config_.exists()
+      preserve = (shadow_,config_)
+    # retrieve configuration
+    cfg = {}; exec(config_.read_text(),cfg)
+    cats = Path(cfg['cats'])
+    assert cats.is_dir()
+    routes = cfg.get('routes')
+    routes = {} if routes is None else dict(routes)
+    assert all(isinstance(x,XposeBase) for x in routes.values())
+    for key,default in dict(main=XposeMain,attach=XposeAttach,manage=XposeServer).items():
+      if routes.get(key) is None: routes[key] = default()
+    release = cfg.get('release',0)
+    assert isinstance(release,int) and release >= 0
+    upgrades = [cfg[f'upgrade_{n}'] for n in range(release)]
+    # collect current entry listing
+    dump = self.dump()
+    listing = dump['listing']
+    user_version = dump['meta']['user_version']
     # upgrade entry listing
-    while True:
-      cfg = upgrade[f'upgrade_{user_version}'](listing)
-      if cfg is not None: break
-      user_version += 1
-    # initialise mirror root and load entry listing
-    initial(mirror,cfg,user_version,preserve).load(listing)
-    return json.dumps({'transferred':len(listing)}),{'Content-Type':'text/json'}
-
-#======================================================================================================================
-class XposeInit (XposeBase,CGIMixin):
-#======================================================================================================================
-
-  def do_get(self):
-    upgrader = self.root/'upgrader.py'
-    upgrade = {}; exec(upgrader.read_text(),upgrade)
-    cfg = upgrade['initial']()
-    initial(self.root,cfg,preserve=(upgrader,))
-    (self.root/'shadow').mkdir()
-    (self.root/'shadow'/'cats').symlink_to(cfg.cats)
-    return '{}',{'Content-Type':'text/json'}
-
-#======================================================================================================================
-def initial(path,cfg,user_version=0,preserve=()):
-#======================================================================================================================
-  for f in path.iterdir():
-    if f in preserve: continue
-    if not f.is_symlink() and f.is_dir(): shutil.rmtree(f)
-    else: f.unlink()
-  (path/'.htaccess').write_text('<FilesMatch ".*\\.db$">\nRequire all denied\n</FilesMatch>')
-  (path/'attach').mkdir();(path/'attach'/'.uploaded').mkdir()
-  cats = path/'cats'
-  if cats.exists(): cats.unlink(); cats.symlink_to(cfg.cats)
-  else: shutil.copytree(cfg.cats,cats,symlinks=True)
-  (path/'.config').mkdir()
-  set_config(path/'.config',**cfg.setup(path))
-  xpose = get_config(path/'.config','manage')
-  with xpose.connect() as conn:
-    conn.executescript(XposeSchema)
-    conn.execute(f'PRAGMA user_version = {user_version}')
-  xpose.cats.initial(xpose=xpose)
-  return xpose
+    n_upgrades = release - user_version
+    if target_is_shadow is True:
+      assert n_upgrades>=0
+      for upg in upgrades[user_version:release]: upg(listing)
+    else: assert n_upgrades==0 # forces any upgrade to go through shadow first
+    # initialise target
+    for f in target.iterdir():
+      if f in preserve: continue
+      if not f.is_symlink() and f.is_dir(): shutil.rmtree(f)
+      else: f.unlink()
+    # set attach
+    attach_ = target/'attach'
+    attach_.mkdir();(attach_/'.uploaded').mkdir()
+    # set cats
+    cats_ = target/'cats'
+    if target_is_shadow: cats_.unlink(missing_ok=True); cats_.symlink_to(cats)
+    else: shutil.copytree(cats,cats_,symlinks=True)
+    # set route.py
+    if not target_is_shadow:
+      route_ = target/'route.py'
+      route_.write_text(RoutingCode)
+      route_.chmod(0o750)
+    # set .routes
+    routes_ = target/'.routes'
+    routes_.mkdir(); set_config(routes_,**routes)
+    # set index.db
+    xpose = get_config(routes_,'manage').setup(target)
+    xpose.index_db.touch() # to set correct mode
+    with xpose.connect() as conn:
+      conn.executescript(XposeSchema)
+      conn.execute(f'PRAGMA user_version = {release}')
+    xpose.cats.initial(xpose=xpose)
+    # load entry listing
+    xpose.load(listing)
+    # result
+    return json.dumps({'user_version':release,'upgrades':n_upgrades}),{'Content-Type':'text/json'}

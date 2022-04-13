@@ -24,8 +24,8 @@ export default class manageView {
       button.addEventListener('click',()=>{this.shadow()})
     }
     { // infobox
-      addText(menu,' Current version: ')
-      this.el_version = addElement(menu,'span')
+      addText(menu,' Xpose instance: ')
+      this.el_version = addElement(menu,'b')
     }
     {
       const div = addElement(this.toplevel,'div')
@@ -56,7 +56,7 @@ export default class manageView {
 
   display1 (data) {
     if (this.variant) { this.el_shadow.title = 'Transfer shadow->instance'; this.el_shadow.className = 'caution' } // done once never changed
-    this.el_version.innerText = `${data.version}[${new Date(data.ts*1000).toISOString()}]`
+    this.el_version.innerText = `${data.root}:${data.version}[${new Date(data.ts*1000).toISOString()}]`
     const stats = data.stats
     const el_cat = this.el_stats.cat
     el_cat.innerHTML = ''

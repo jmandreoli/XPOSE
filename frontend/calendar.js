@@ -138,7 +138,7 @@ class DetailedEventSource {
   }
   formatTime (t) {
     const m = t.getMinutes()
-    return `${1+((t.getHours()-1)%12+12)%12}${m?':'+String(m).padStart(2,'0'):''}${t.getHours()<12?'am':'pm'}`
+    return `${1+((t.getHours()-1)%12+12)%12}${m?':'+String(m).padStart(2,'0'):''}${t.getHours()<12?'am':'pm'}` // ugly!
   }
 }
 
