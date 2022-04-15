@@ -16,20 +16,19 @@ from .utils import CGIMixin,http_raise,http_ts
 #======================================================================================================================
 class XposeMain (XposeBase,WithAttachMixin,CGIMixin):
   r"""
-An instance of this class is a CGI resource managing the Xpose index database.
+An instance of this class is a CGI resource managing the index database of an Xpose instance.
+
+:param authoriser: callable taking as input an access level and a path, and restricting access to that path to that level
+:param attach_namer: callable taking as input an entry oid and returning a string suitable as a path name for attachment
   """
 #======================================================================================================================
 
-  attach_namer: Callable[[int],str]
-  r"""Function mapping an oid into a (relative) folder pathname"""
-  authoriser: Callable[[str,Path],None]
-  r"""Function setting the access authorisation level for a folder"""
   sql_oid = '''SELECT oid,version,cat,Short.value as short,Entry.value as value,attach,access
     FROM Entry LEFT JOIN Short ON Short.entry=oid
     WHERE oid=?'''
   r"""The SQL query to retrieve an entry given its oid"""
 
-  def __init__(self,authoriser=None,attach_namer=None,**ka):
+  def __init__(self,authoriser:Callable[[str,Path],None]=None,attach_namer:Callable[[int],str]=None):
     self.authoriser = authoriser
     self.attach_namer = attach_namer
 
@@ -105,14 +104,16 @@ Input is expected as a JSON encoded object with a single field ``oid``, which mu
 class XposeAttach (XposeBase,WithAttachMixin,CGIMixin):
   r"""
 An instance of this class is a CGI resource managing the Xpose attachment folder.
+
+:param chunk: the max size (in MiB) used for buffering large file upload transfer
   """
 #======================================================================================================================
 
   chunk: int
-  r"""Controls the chunk size for file upload"""
+  r"""Controls the chunk size (in bytes) for file upload"""
 
-  def __init__(self,chunk:int=0x100000):
-    self.chunk = chunk
+  def __init__(self,chunk:int=1):
+    self.chunk = chunk*0x100000
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):

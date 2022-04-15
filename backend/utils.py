@@ -4,9 +4,9 @@
 # Purpose:              Xpose: misc utilities
 #
 
-import sys,os,json,re,dill as pickle
+import sys,os,json,re
 from pathlib import Path
-from functools import singledispatch
+from functools import cached_property, singledispatch
 from datetime import datetime
 from http import HTTPStatus
 from urllib.parse import parse_qsl,urljoin
@@ -124,6 +124,46 @@ An instance of this class is a bijection between the interval of whole numbers f
     n = int(x,2) # convert: 20-bit-str -> 20-bit-int
     return (n-self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
 
+
+#======================================================================================================================
+class Backup:
+  r"""
+An instance of this class creates a context allowing transactional operations on the first level of a directory (called the root).
+A subdirectory of the root must be named, and will be used for backup. It should only be used for that purpose.
+The only allowed transactional operations take a single name (with no path separator) as input and move the file (or sub-directory) corresponding to that name from the root directory (if it exists) into the backup directory.
+If the context exits with an exception, all the files and directories affected by the transactional operations are restored, erasing new ones if needed.
+  """
+#======================================================================================================================
+  def __init__(self,p:Union[str,Path],name:str='.backup'):
+    self.root = Path(p).resolve()
+    assert self.root.is_dir() and len(Path(name).parts) == 1, (p,name)
+    self.backup = self.root/name
+  def __enter__(self):
+    self._clear(self.backup) # just in case (e.g. crash), normally absent
+    self.backup.mkdir()
+    self.backup_log = []
+    return self
+  def __exit__(self,type,*a):
+    if type is not None:
+      for f,f_bak in self.backup_log: # restore
+        self._clear(f)
+        if f_bak is not None: f_bak.rename(f)
+      self.backup.rmdir() # normally empty after restore
+    else: self._clear(self.backup)
+  def __call__(self,name:str):
+    assert len(Path(name).parts) == 1 and name != self.backup.name # :-)
+    f = self.root/name
+    if f.exists(): f_bak = self.backup/name; f.rename(f_bak)
+    else: f_bak = None
+    self.backup_log.append((f,f_bak))
+    return f
+  @staticmethod
+  def _clear(f:Path):
+    from shutil import rmtree
+    if f.is_symlink(): f.unlink()
+    elif f.is_dir(): rmtree(f)
+    else: f.unlink(missing_ok=True)
+
 #======================================================================================================================
 # Miscellaneous
 #======================================================================================================================
@@ -134,10 +174,12 @@ def http_raise(status): raise HTTPException(status)
 def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
 def set_config(path,**ka):
+  from dill import dump
   for key,cfg in ka.items():
-    with (Path(path)/key).with_suffix('.pk').open('wb') as v: pickle.dump(cfg,v)
+    with (Path(path)/key).with_suffix('.pk').open('wb') as v: dump(cfg,v)
 def get_config(path,key):
-  with (Path(path)/key).with_suffix('.pk').open('rb') as u: cfg = pickle.load(u)
+  from dill import load
+  with (Path(path)/key).with_suffix('.pk').open('rb') as u: cfg = load(u)
   return cfg
 
 class str_md(str): pass  # to identify Markdown strings

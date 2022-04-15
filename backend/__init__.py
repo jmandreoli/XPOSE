@@ -56,7 +56,8 @@ from pathlib import Path
 from typing import Optional, Union, Callable, Dict, Any
 from .utils import CGIMixin, rebase, http_ts
 from .utils import get_config,set_config # not used, but made available
-if not hasattr(Path,'hardlink_to'): Path.hardlink_to = lambda self,target: Path(target).link_to(self) # fixes a compatibility issue, useless in python 3.10+
+assert hasattr(Path,'hardlink_to'), 'You are using a version of python<3.10; try the fix below'
+# Path.hardlink_to = lambda self,target: Path(target).link_to(self)
 #sqlite3.register_converter('json',json.loads)
 
 #======================================================================================================================
@@ -95,15 +96,13 @@ class WithCatsMixin:
 class XposeClient (XposeBase,WithCatsMixin,CGIMixin):
   r"""
 An instance of this class is a CGI resource managing (restricted) client access to the Xpose index database through prepared SQL queries.
+
+:param authorise: callable taking as input an access level and returning whether access is authorised
+:param prepared: dictionary mapping each sql query name to its actual query, and for each of its parameters, the corresponding key in the request input
   """
 #======================================================================================================================
 
-  authorise: Callable[[str],bool]
-  r"""Function controlling access to the entries of this instance"""
-  prepared: dict[str,tuple[str,...]]
-  r"""Mapping query names to actual SQL queries (with variables)"""
-
-  def __init__(self,authorise=(lambda level: False),prepared:Dict[str,tuple[str,...]]={}):
+  def __init__(self,authorise:Callable[[str],bool]=(lambda level: False),prepared:dict[str,tuple[str,...]]={}):
     self.authorise = authorise
     self.prepared = prepared
 
