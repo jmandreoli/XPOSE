@@ -173,6 +173,8 @@ class HTTPException (Exception):
 def http_raise(status): raise HTTPException(status)
 def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
+def default_attach_namer(n:int,split=(lambda x: f'{x[:2]}/{x[-2:]}'))->str: return split(f'{n:04x}')
+
 def set_config(path,**ka):
   from dill import dump
   for key,cfg in ka.items():

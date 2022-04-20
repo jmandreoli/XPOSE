@@ -11,7 +11,7 @@ from http import HTTPStatus
 from typing import Union, Callable, Dict, Any
 from . import XposeBase
 from .attach import WithAttachMixin
-from .utils import CGIMixin,http_raise,http_ts
+from .utils import CGIMixin,http_raise,http_ts,default_attach_namer
 
 #======================================================================================================================
 class XposeMain (XposeBase,WithAttachMixin,CGIMixin):
@@ -28,15 +28,15 @@ An instance of this class is a CGI resource managing the index database of an Xp
     WHERE oid=?'''
   r"""The SQL query to retrieve an entry given its oid"""
 
-  def __init__(self,authoriser:Callable[[str,Path],None]=None,attach_namer:Callable[[int],str]=None):
+  def __init__(self,authoriser:Callable[[str,Path],None]=(lambda level,path: None),attach_namer:Callable[[int],str]=default_attach_namer):
     self.authoriser = authoriser
     self.attach_namer = attach_namer
 
   def connect(self,**ka):
     conn = super().connect(**ka)
-    conn.create_function('create_attach',2,(lambda oid,attach,namer=self.attach_namer: namer(oid)))
-    conn.create_function('delete_attach',1,(lambda attach,rmdir=self.attach.rmdir:rmdir(attach,True)))
-    conn.create_function('authoriser',2,(lambda access,attach,auth=self.authoriser,root=self.attach.root: auth(access,root/attach)))
+    conn.create_function('create_attach',1,self.attach_namer,deterministic=True)
+    conn.create_function('delete_attach',1,self.attach.rmdir,deterministic=True)
+    conn.create_function('authoriser',2,(lambda access,attach,auth=self.authoriser,root=self.attach.root: auth(access,root/attach)),deterministic=True)
     return conn
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -76,18 +76,17 @@ Input is expected as any JSON encoded entry. Validation is not performed.
 #----------------------------------------------------------------------------------------------------------------------
     entry = self.parse_input()
     oid,version,access,value = entry.get('oid'),entry.get('version'),entry['access'],json.dumps(entry['value'])
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
     if oid is None:
       version=0
-      sql = 'INSERT INTO Entry (version,cat,value,created,modified,access) VALUES (?,?,?,?,?,?)',(version+1,entry['cat'],value,now,now,access)
+      sql = 'INSERT INTO Entry (version,cat,value,created,modified,access) VALUES (?,?,?,?,?,?) RETURNING oid',(version+1,entry['cat'],value,now,now,access)
     else:
       version = int(version)
-      sql = 'UPDATE Entry SET version=iif(version=?,?,NULL),value=?,modified=?,access=? WHERE oid=?',(version,version+1,value,now,access,int(oid))
+      sql = 'UPDATE Entry SET version=iif(version=?,?,NULL),value=?,modified=?,access=? WHERE oid=? RETURNING oid',(version,version+1,value,now,access,int(oid))
     with self.connect() as conn:
-      try: res = conn.execute(*sql)
+      try: oid, = conn.execute(*sql).fetchone()
       except sqlite3.IntegrityError: http_raise(HTTPStatus.CONFLICT)
-      if oid is None: oid = res.lastrowid
-      attach,short = conn.execute('SELECT attach,Short.value FROM Entry,Short WHERE Short.entry=? AND oid=?',(oid,oid)).fetchone()
+      short,attach = conn.execute('SELECT Short.value,Entry.attach FROM Entry,Short WHERE oid=? AND entry=oid',(oid,)).fetchone()
     return json.dumps({'oid':oid,'version':version+1,'short':short,'attach':attach}), {'Content-Type':'text/json'}
 
 #----------------------------------------------------------------------------------------------------------------------

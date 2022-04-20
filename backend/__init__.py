@@ -44,10 +44,11 @@ For each category ``{cat}``, the following files are expected in folder ``cats``
 
 The following sqlite functions are made available in contexts where they are needed:
 
-* :func:`create_attach`(oid,attach): called when an entry is created to set its ``attach`` field in the index, given its ``oid`` and ``attach`` fields (the latter is overridden)
-* :func:`delete_attach`(oid): called when an entry with a given ``oid`` field is deleted
-* :func:`authorise`(level): controls access to an entry given its level (field ``access`` in the index)
-* :func:`apply_template`(tmpl,err_tmpl,rendering,args): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
+* :func:`create_attach`(*oid*): called when an entry is created to set its ``attach`` field in the index, given its *oid*
+* :func:`delete_attach`(*oid*): called when an entry with a given *oid* field is deleted
+* :func:`authorise`(*level*): called to check access to an entry given its *level* (extracted from field ``access`` in the index)
+* :func:`authoriser`(*level*,*path*): called to set an access control to *path* to the given *level*
+* :func:`apply_template`(*tmpl*,*err_tmpl*,*rendering*,*args*): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
 """
 
 import sqlite3,json
@@ -59,6 +60,7 @@ from .utils import get_config,set_config # not used, but made available
 assert hasattr(Path,'hardlink_to'), 'You are using a version of python<3.10; try the fix below'
 # Path.hardlink_to = lambda self,target: Path(target).link_to(self)
 #sqlite3.register_converter('json',json.loads)
+sqlite3.enable_callback_tracebacks(True)
 
 #======================================================================================================================
 class XposeBase:
@@ -98,27 +100,31 @@ class XposeClient (XposeBase,WithCatsMixin,CGIMixin):
 An instance of this class is a CGI resource managing (restricted) client access to the Xpose index database through prepared SQL queries.
 
 :param authorise: callable taking as input an access level and returning whether access is authorised
-:param prepared: dictionary mapping each sql query name to its actual query, and for each of its parameters, the corresponding key in the request input
+:param prepared: dictionary mapping each sql query name to an actual query with named parameters only
   """
 #======================================================================================================================
 
-  def __init__(self,authorise:Callable[[str],bool]=(lambda level: False),prepared:dict[str,tuple[str,...]]={}):
+  def __init__(self,authorise:Callable[[str],bool]=(lambda level: False),prepared:dict[str,str]={}):
     self.authorise = authorise
     self.prepared = prepared
 
   def connect(self,**ka):
     conn = super().connect(**ka)
-    conn.create_function('authorise',1,self.authorise)
-    conn.create_function('xpose_template',4,(lambda tmpl,err_tmpl,rendering,args,t=self.cats.apply_template:t(tmpl,err_tmpl,rendering,xpose=self,**json.loads(args))))
+    conn.create_function('authorise',1,self.authorise,deterministic=True)
+    conn.create_function('xpose_template',4,(lambda tmpl,err_tmpl,rendering,args,t=self.cats.apply_template:t(tmpl,err_tmpl,rendering,xpose=self,**json.loads(args))),deterministic=True)
     return conn
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
+    r"""
+Input is expected as an (encoded) form with one field ``sql`` whose value is the name of a prepared sql query, plus fields to fill the named parameters in that query.
+    """
+#----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
-    sql,*args = self.prepared[form['sql']]
-    args = tuple(map(form.get,args))
+    sql = self.prepared[form['sql']]
     with self.connect() as conn:
       conn.row_factory = sqlite3.Row
-      resp = [dict(r) for r in conn.execute(sql,args).fetchall()]
+      resp = [dict(r) for r in conn.execute(sql,form)]
       return json.dumps(resp), {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
 
   @cached_property

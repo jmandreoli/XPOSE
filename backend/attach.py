@@ -62,7 +62,7 @@ An instance of this class manages an xpose instance's attachments (field ``attac
       src.rename(trg)
 
 #----------------------------------------------------------------------------------------------------------------------
-  def rmdir(self,path:Path,check_exists=False):
+  def rmdir(self,path:Path,check_exists=True):
 #----------------------------------------------------------------------------------------------------------------------
     if check_exists and not (self.root/path).exists(): return
     shutil.rmtree(self.root/path)
