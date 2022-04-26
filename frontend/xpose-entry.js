@@ -4,7 +4,7 @@
  * Purpose:              Xpose: client side entry view
  */
 
-import { addElement, addJButton, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert } from './utils.js'
+import { encodeURIqs, addElement, addJButton, addText, toggle_display, deleteConfirm, noopAlert, AjaxError } from './utils.js'
 
 export default class entryView {
 
@@ -13,27 +13,27 @@ export default class entryView {
     const menu = addElement(this.toplevel,'div')
     { // return button
       const button = addJButton(menu,'arrowreturnthick-1-w',{title:'Return to listing view'})
-      button.addEventListener('click',()=>{this.close()})
+      button.addEventListener('click',()=>this.close().catch(err=>this.onerror(err)))
     }
     { // refresh button
       const button = addJButton(menu,'refresh',{title:'Refresh entry'})
-      button.addEventListener('click',()=>{this.refresh()})
+      button.addEventListener('click',()=>this.refresh().catch(err=>this.onerror(err)))
     }
     { // save entry button
       const button = this.el_save = addJButton(menu,'arrowthickstop-1-n',{title:'Save entry'})
-      button.addEventListener('click',()=>{this.save()})
+      button.addEventListener('click',()=>this.save().catch(err=>this.onerror(err)))
     }
     { // delete entry button
       const button = addJButton(menu,'trash',{title:'Delete entry (if confirmed)',class:'caution'})
-      button.addEventListener('click',()=>{this.remove()})
+      button.addEventListener('click',()=>this.remove().catch(err=>this.onerror(err)))
     }
     { // go-to "attachment" button
       const button = addJButton(menu,'folder-open',{title:'Show attachment'})
-      button.addEventListener('click',()=>{this.go_attach()})
+      button.addEventListener('click',()=>this.go_attach().catch(err=>this.onerror(err)))
     }
     { // toggle access editor button
       const button = addJButton(menu,'unlocked',{title:'Toggle access controls editor'})
-      button.addEventListener('click',()=>{toggle_display(this.accessEditor.element)})
+      button.addEventListener('click',()=>toggle_display(this.accessEditor.element))
       this.el_locked = button
     }
     { // info box (short name of entry)
@@ -53,13 +53,14 @@ export default class entryView {
     this.active = false
   }
 
-  display_new (cat) {
+  async display_new (cat) {
     this.display({ cat: cat, value: {}, short: `New ${cat}` })
   }
-  display_old (oid) {
-    axios({url:`${this.url}/main?oid=${encodeURIComponent(oid)}`,headers:{'Cache-Control':'no-store'}}).
-      then((resp)=>this.display(resp.data)).
-      catch(this.ajaxError)
+  async display_old (oid) {
+    const sql = 'SELECT oid,version,cat,short,value as "value [JSON]",attach,access FROM EntryShort WHERE oid=:oid'
+    const resp = await axios({url:encodeURIqs(`${this.url}/main`,{sql:sql,oid:oid}),headers:{'Cache-Control':'no-store'}}).
+      catch(err=>{throw new AjaxError(err)})
+    this.display(resp.data[0])
   }
 
   display (entry) {
@@ -70,66 +71,60 @@ export default class entryView {
     this.accessEditor.setValue(entry.access)
     this.editor = new JSONEditor(this.el_main,this.editorConfig())
     this.editor.on('ready',()=>{ this.setShort(); this.setLocked(); this.show() })
-    this.editor.on('change',()=>{if (this.active) {this.set_dirty(true)} else {this.active=true} })
+    this.editor.on('change',()=>{ if (this.active) {this.set_dirty(true)} else {this.active=true} })
   }
 
-  save () {
+  async save () {
     if (!this.get_dirty()) { return noopAlert() }
     const errors = this.editor.validate()
     if (errors.length) { return this.error('validation',errors) }
     this.entry.value = this.editor.getValue()
     this.entry.access = this.accessEditor.getValue()||null
     this.editor.disable()
-    axios({url:`${this.url}/main`,method:'PUT',data:this.entry}).
+    const resp = await axios({url:`${this.url}/main`,method:'PUT',data:this.entry}).
       finally(()=>this.editor.enable()).
-      then((resp)=>this.save1(resp.data)).
-      catch(this.ajaxError)
-  }
-  save1 (data) {
+      catch(err=>{throw new AjaxError(err)})
     this.set_dirty(false)
-    this.entry.oid = data.oid
-    this.entry.version = data.version
-    this.entry.short = data.short
-    this.entry.attach = data.attach
+    for (const att of ['oid','version','short','attach']) { this.entry[att] = resp.data[att] }
     this.setShort()
     this.setLocked()
   }
 
-  remove () {
+  async remove () {
     if (!deleteConfirm()) return
     this.editor.disable()
-    axios({url:`${this.url}/main`,method:'DELETE',data:{oid:this.entry.oid}}).
-      then((resp)=>this.close(true)).
-      catch(this.ajaxError)
+    await axios({url:`${this.url}/main`,method:'DELETE',data:{oid:this.entry.oid}}).
+      catch(err=>{throw new AjaxError(err)})
+    await this.close(true)
   }
 
-  refresh () {
+  async refresh () {
     if (!this.confirm_dirty()) {
       this.editor.destroy()
       this.el_main.innerHTML = ''
       const oid = this.entry.oid
-      if (!oid) { this.display_new(this.entry.cat) }
-      else { this.display_old(oid) }
+      if (!oid) { await this.display_new(this.entry.cat) }
+      else { await this.display_old(oid) }
     }
   }
 
-  close (force) {
+  async close (force) {
     if (force || !this.confirm_dirty()) {
       this.editor.destroy()
       this.el_main.innerHTML = ''
-      this.views.listing.display()
+      await this.views.listing.display()
     }
   }
 
-  go_attach () {
+  async go_attach () {
     if (!this.confirm_dirty()) {
       this.editor.destroy()
       this.el_main.innerHTML = ''
-      this.views.attach.display_entry(this.entry)
+      await this.views.attach.display_entry(this.entry)
     }
   }
 
-  setShort () { this.el_short.innerText = this.entry.short; this.el_short.title = this.entry.oid }
+  setShort () { this.el_short.innerText = this.entry.short; this.el_short.title = `:${this.entry.oid}` }
   setLocked () { this.el_locked.firstElementChild.className = this.entry.access?'ui-icon ui-icon-locked':'ui-icon ui-icon-unlocked' }
 
   show_dirty (flag) { this.el_save.style.backgroundColor = flag?'red':'' }

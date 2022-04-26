@@ -4,7 +4,7 @@
  * Purpose:              Xpose: client side listing view
  */
 
-import { addElement, addJButton, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert } from './utils.js'
+import { encodeURIqs, addElement, addJButton, addText, toggle_display, AjaxError } from './utils.js'
 
 export default class listingView {
 
@@ -14,7 +14,7 @@ export default class listingView {
     const menu = thead.insertRow().insertCell()
     { // refresh button
       const button = this.el_refresh = addJButton(menu,'refresh',{title:'Refresh listing'})
-      button.addEventListener('click',()=>{this.display()})
+      button.addEventListener('click',()=>this.display().catch(err=>this.onerror(err)))
     }
     { // go-to "new entry" form
       const button = addJButton(menu,'plusthick',{title:'Create a new entry'})
@@ -28,7 +28,7 @@ export default class listingView {
     }
     { // go-to "manage" button
       const button = addJButton(menu,'wrench',{title:'Manage xpose instance'})
-      button.addEventListener('click',()=>{this.go_manage()})
+      button.addEventListener('click',()=>this.go_manage().catch(err=>this.onerror(err)))
     }
     { // info box (number of entries)
       addText(menu)
@@ -46,24 +46,19 @@ export default class listingView {
     this.editor.on('change',()=>{if (this.active) {this.set_dirty(true)} else {this.active=true} })
   }
 
-  display () {
+  async display () {
     this.editor.disable()
-    axios({url:`${this.url}/main?sql=${encodeURIComponent(this.editor.getValue())}`,headers:{'Cache-Control':'no-store'}}).
+    const resp = await axios({url:encodeURIqs(`${this.url}/main`,{sql:`${this.editor.schema.title} ${this.editor.getValue()}`}),headers:{'Cache-Control':'no-store'}}).
       finally(()=>this.editor.enable()).
-      then((resp)=>this.display1(resp.data)).
-      catch(this.ajaxError)
-  }
-
-  display1 (data) {
+      catch(err=>{throw new AjaxError(err)})
     this.set_dirty(false)
-    this.el_count.innerText = String(data.length)
+    this.el_count.innerText = String(resp.data.length)
     this.el_main.innerHTML = ''
-    for (const entry of data) {
+    for (const entry of resp.data) {
       const tr = this.el_main.insertRow()
-      tr.addEventListener('click',()=>{this.go_entry_old(entry.oid)})
-      tr.title = String(entry.oid)
-      const access = entry.access?'visible':'hidden'
-      tr.insertCell().innerHTML = `<span style="visibility:${access}; font-size:x-small;">🔒</span>${entry.short}`
+      tr.addEventListener('click',()=>this.go_entry_old(entry.oid).catch(err=>this.onerror(err)))
+      tr.title = `:${entry.oid}`
+      tr.insertCell().innerHTML = `<span style="visibility:${entry.access?'visible':'hidden'}; font-size:x-small;" title="${entry.access}">🔒</span>${entry.short}`
     }
     this.editor.element.style.display = 'none'
     this.show()
@@ -76,25 +71,23 @@ export default class listingView {
       o.innerText = cat
       o.addEventListener('mouseenter',()=>{o.style.filter='invert(100%)'})
       o.addEventListener('mouseleave',()=>{o.style.filter='invert(0%)'})
-      o.addEventListener('click',()=>{this.go_entry_new(cat)})
+      o.addEventListener('click',()=>this.go_entry_new(cat).catch(err=>this.onerror(err)))
     }
   }
 
-  go_manage () { if (!this.confirm_dirty()) this.views.manage.display() }
+  async go_manage () { if (!this.confirm_dirty()) await this.views.manage.display() }
 
-  go_entry_new (cat) { if (!this.confirm_dirty()) this.views.entry.display_new(cat) }
-  go_entry_old (oid) { if (!this.confirm_dirty()) this.views.entry.display_old(oid) }
+  async go_entry_new (cat) { if (!this.confirm_dirty()) await this.views.entry.display_new(cat) }
+  async go_entry_old (oid) { if (!this.confirm_dirty()) await this.views.entry.display_old(oid) }
 
   show_dirty (flag) { this.el_refresh.style.backgroundColor = flag?'red':'' }
 
   editorConfig () {
-    const queryDefault = `SELECT oid,access,Short.value as short
-FROM Entry LEFT JOIN Short ON Short.entry=oid
--- WHERE created LIKE '2013-%'
+    const queryDefault = `-- WHERE created LIKE '2013-%'
 ORDER BY created DESC
-LIMIT 30`
+LIMIT 30 OFFSET 0`
     return {
-      schema: { title: 'Query editor', type: 'string', format: 'textarea', options: { inputAttributes: { rows: 5, cols: 160 } } },
+      schema: { title: 'SELECT oid,access,short FROM EntryShort', type: 'string', format: 'textarea', options: { inputAttributes: { rows: 3, cols: 80 } } },
       startval: queryDefault
     }
   }

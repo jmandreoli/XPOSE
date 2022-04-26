@@ -4,7 +4,7 @@
  * Purpose:              Xpose: client side manage view
  */
 
-import { addElement, addJButton, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert } from './utils.js'
+import { encodeURIqs, addElement, addJButton, addText, AjaxError } from './utils.js'
 
 export default class manageView {
 
@@ -18,19 +18,19 @@ export default class manageView {
     const menu = addElement(this.toplevel,'div')
     { // return button
       const button = addJButton(menu,'arrowreturnthick-1-w',{title:'Return to listing view'})
-      button.addEventListener('click',()=>{this.close()})
+      button.addEventListener('click',()=>this.close().catch(err=>this.onerror(err)))
     }
     { // refresh button
       const button = addJButton(menu,'refresh',{title:'Refresh view'})
-      button.addEventListener('click',()=>{this.display()})
+      button.addEventListener('click',()=>this.display().catch(err=>this.onerror(err)))
     }
     { // dump button
       const button = addJButton(menu,'arrowthickstop-1-s',{title:'Dump content'})
-      button.addEventListener('click',()=>{window.open(`${this.url}/manage`,'_blank')})
+      button.addEventListener('click',()=>window.open(`${this.url}/manage`,'_blank'))
     }
     { // shadow button
       const button = this.el_shadow = addJButton(menu,'newwin',{title:'Transfer instance->shadow'})
-      button.addEventListener('click',()=>{this.shadow()})
+      button.addEventListener('click',()=>this.shadow().catch(err=>this.onerror(err)))
     }
     { // infobox
       addText(menu,' Xpose instance: ')
@@ -52,32 +52,28 @@ export default class manageView {
     }
   }
 
-  display () {
-    const a = Object.entries(this.stats).map(x=>`${x[0]}=${encodeURIComponent(x[1])}`).join('&')
-    axios({url:`${this.url}/manage?${a}`,headers:{'Cache-Control':'no-store'}}).
-      then((resp)=>this.display1(resp.data)).
-      catch(this.ajaxError)
-  }
-
-  display1 (data) {
+  async display () {
+    const resp = await axios({url:encodeURIqs(`${this.url}/manage`,this.stats),headers:{'Cache-Control':'no-store'}}).
+      catch(err=>{throw new AjaxError(err)})
     if (this.variant) { this.el_shadow.title = 'Transfer shadow->instance'; this.el_shadow.className = 'caution' } // done once never changed
-    const meta = data.meta
+    const meta = resp.data.meta
     this.el_version.innerText = `${meta.root}:${meta.user_version}[${new Date(meta.ts*1000).toISOString()}]`
     for (const [key,el] of Object.entries(this.el_stats)) {
       el.innerHTML = ''
-      for (const [val,cnt] of data[key]) {
+      for (const r of resp.data[key]) {
         const tr = el.insertRow()
-        addText(tr.insertCell(),val)
-        addText(tr.insertCell(),String(cnt))
+        addText(tr.insertCell(),r.val)
+        addText(tr.insertCell(),String(r.cnt))
       }
     }
     this.show()
   }
 
-  shadow () {
+  async shadow () {
     if (this.variant && !window.confirm('You are about to override the entire Xpose instance.')) { return }
-    axios({url:`${this.url}/manage`,method:'POST'}).then(()=>this.toggle_variant()).catch(this.ajaxError)
+    await axios({url:`${this.url}/manage`,method:'POST'}).catch(err=>{throw new AjaxError(err)})
+    this.toggle_variant()
   }
 
-  close () { this.views.listing.display() }
+  async close () { await this.views.listing.display() }
 }

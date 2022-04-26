@@ -4,7 +4,6 @@
 # Purpose:              Xpose: instance management operations
 #
 import sys,sqlite3,shutil,json
-from collections import namedtuple
 from pathlib import Path
 from typing import Union, Callable, Any, Optional
 from . import XposeBase, WithCatsMixin
@@ -16,12 +15,12 @@ CREATE TABLE Entry (
   oid INTEGER PRIMARY KEY AUTOINCREMENT,
   version INTEGER NOT NULL,
   cat TEXT NOT NULL,
-  value JSON NOT NULL,
+  value TEXT NOT NULL, -- JSON
   attach TEXT NULLABLE,
   created DATETIME NOT NULL,
   modified DATETIME NOT NULL,
   access TEXT NULLABLE,
-  memo JSON NULLABLE
+  memo TEXT NULLABLE -- JSON
 );
 
 CREATE TRIGGER EntryTriggerInsert AFTER INSERT ON Entry
@@ -46,6 +45,12 @@ CREATE TRIGGER ShortTriggerBeforeDelete BEFORE DELETE ON Entry
   BEGIN DELETE FROM Short WHERE entry=OLD.oid; END;
 CREATE TRIGGER ShortTriggerBeforeUpdate BEFORE UPDATE OF value ON Entry
   BEGIN DELETE FROM Short WHERE entry=OLD.oid; END;
+
+CREATE VIEW EntryFull AS -- Use only with detect_types=sqlite3.PARSE_COLNAMES
+  SELECT version,cat,value AS "value [JSON]",attach AS "attach [ATTACH]",created,modified,access,memo AS "memo [JSON]" FROM Entry;
+
+CREATE VIEW EntryShort AS
+  SELECT oid,version,cat,Entry.value AS value,attach,created,modified,access,memo,Short.value AS short FROM Entry LEFT JOIN Short ON Short.entry=oid;
 '''
 
 RoutingCode = f'''#!{sys.executable}
@@ -57,8 +62,6 @@ umask(0o7)
 variant = '.' if (morsel:=SimpleCookie(environ.get('HTTP_COOKIE','')).get('xpose-variant')) is None else morsel.coded_value
 path = Path(__file__).resolve().parent/variant
 get_config(path/'.routes',environ['PATH_INFO'][1:]).setup(path).process_cgi()'''
-
-MetaInfo = namedtuple('MetaInfo','root ts')
 
 #======================================================================================================================
 class XposeServer (XposeBase,WithCatsMixin,WithAttachMixin,CGIMixin):
@@ -75,6 +78,24 @@ An instance of this class is a CGI resource managing a whole Xpose instance.
     self.attach_namer = attach_namer
 
 #----------------------------------------------------------------------------------------------------------------------
+  def dump(self,meta:dict[str,Optional[str]]=None,**queries)->dict[str,Any]:
+    r"""
+Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query pairs). Returns a dictionary with the same keys and values set to the results of the queries. The dictionary *meta* holds a description of the batch and its execution and is added to the result with key ``meta``.
+    """
+#----------------------------------------------------------------------------------------------------------------------
+    def attach_contents(attach,root=self.attach.root):
+      p = root/attach.decode() # sqlite converters' arguments are always bytes
+      return dict((str(f.relative_to(p)),str(f)) for f in p.glob('**/*') if not f.is_dir()) or None
+    sqlite3.register_converter('ATTACH',attach_contents)
+    queries_:dict[str,str] = dict(queries) or {'listing':'SELECT * FROM EntryFull'}
+    with self.connect(detect_types=sqlite3.PARSE_COLNAMES,isolation_level='IMMEDIATE') as conn:
+      conn.row_factory = sqlite3.Row
+      R:dict[str,Any] = {label:[dict(r) for r in conn.execute(sql)] for label,sql in queries_.items()}
+      user_version, = conn.execute('PRAGMA user_version').fetchone()
+      R['meta'] = {'root':str(self.root),'ts':self.index_db.stat().st_mtime,'user_version':user_version,**(meta or {})}
+    return R
+
+#----------------------------------------------------------------------------------------------------------------------
   def load(self,listing:list):
     r"""
 Loads some entries in the index database. Entries are validated, and behaviour is transactional. The ``attach`` field in each entry must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that subfolders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
@@ -82,61 +103,31 @@ Loads some entries in the index database. Entries are validated, and behaviour i
 :param listing: the list of entries to load into the index database
     """
 #----------------------------------------------------------------------------------------------------------------------
-    def entry(row):
+    with self.connect() as conn:
+      conn.row_factory = sqlite3.Row
+      fields = tuple(field for r in conn.execute('PRAGMA table_info(Entry)') if (field:=r['name'])!='oid')
+    def entry(row,fields=fields,field_set=frozenset(fields)):
       assert set(row) == field_set, set(row)^field_set
-      value = row['value']
-      self.cats.validate(row['cat'],value)
-      row['value'] = json.dumps(value)
-      memo = row['memo']
-      row['memo'] = None if memo is None else json.dumps(memo)
+      self.cats.validate(row['cat'],row['value'])
       contents = row['attach']; row['attach'] = None
       return tuple(row[f] for f in fields),contents
-    with self.connect() as conn: conn.row_factory = sqlite3.Row; fields = [x['name'] for x in conn.execute('PRAGMA table_info(Entry)')]
-    fields.remove('oid')
-    field_set = set(fields)
     listing_,contents_ = zip(*map(entry,listing))
     def create_attach(oid,namer=self.attach_namer,root=self.attach.root,contents_=iter(contents_)):
       attach = namer(oid)
       contents = next(contents_)
       if contents is not None:
+        p = root/attach
         for name,src in contents.items():
-          trg = root/attach/name
+          if name=='.htaccess': continue # top-level access control is handled elsewhere
+          trg = p/name
           trg.parent.mkdir(parents=True,exist_ok=True)
           trg.hardlink_to(src)
       return attach
-    with self.connect() as conn:
+    with self.connect(isolation_level='IMMEDIATE') as conn:
       conn.create_function('create_attach',1,create_attach,deterministic=True)
       conn.create_function('authoriser',2,(lambda access,attach,auth=self.authoriser,root=self.attach.root: auth(access,root/attach)),deterministic=True)
       sql = f'INSERT INTO Entry ({",".join(fields)}) VALUES ({",".join(len(fields)*["?"])})'
       conn.executemany(sql,listing_)
-
-#----------------------------------------------------------------------------------------------------------------------
-  def dump(self,clause:str=None):
-    r"""
-Extracts a list of entries from the index database. The ``attach`` field in each entry has the same form as in :meth:`load`.
-
-:param clause: specifies extra SQL clauses (WHERE, ORDER BY, LIMIT...) to extract the entries (if absent, all the entries are extracted)
-    """
-#----------------------------------------------------------------------------------------------------------------------
-    def trans(row):
-      row = dict(row)
-      del row['oid']
-      p = self.attach.root/row['attach']
-      row['attach'] = dict((str(f.relative_to(p)),str(f)) for f in p.glob('**/*') if not f.is_dir()) or None
-      row['value'] = json.loads(row['value'])
-      row['memo'] = json.loads(row['memo'] or 'null')
-      return row
-    clause_ = '' if clause is None else f' {clause}'
-    with self.connect(isolation_level='IMMEDIATE') as conn:
-      conn.row_factory = sqlite3.Row
-      listing = list(map(trans,conn.execute(f'SELECT * FROM Entry{clause_}')))
-      user_version, = conn.execute('PRAGMA user_version').fetchone()
-      meta = self.meta
-    return {'meta':{'origin':'XposeDump','clause':clause,'user_version':user_version,**meta._asdict()},'listing':listing}
-
-  @property
-  def meta(self)->MetaInfo:
-    return MetaInfo(root=str(self.root),ts=self.index_db.stat().st_mtime)
 
 #----------------------------------------------------------------------------------------------------------------------
   def precompute_trigger(self,table:str,cat:str,defn:str,when:str=None):
@@ -165,18 +156,15 @@ END'''
 
   def do_get(self):
     r"""
-Input is expected as an (encoded) form with either no field (dump) or sql-query valued fields.
+Input is expected as an (encoded) form specifying arguments for a :meth:`dump` call.
+
+* If a field key starts with ``sql:`` (ignoring case), then the rest of key is considered the label of an sql query which is either the value of the field, or, if the key is ``SQL:``, an extra clause for a full-information dump query.
+* Otherwise, the field key-value pair provides arguments passed to the queries.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
-    if form:
-      with self.connect(isolation_level='IMMEDIATE') as conn:
-        user_version, = conn.execute('PRAGMA user_version').fetchone()
-        resp = dict((label,conn.execute(sql).fetchall()) for label,sql in form.items())
-        meta = self.meta
-        resp['meta'] = {'user_version':user_version,**meta._asdict()}
-    else: resp = self.dump()
-    return json.dumps(resp,indent=1),{'Content-Type':'text/json','Content-Disposition':'attachment; filename="dump.json"','Last-Modified':http_ts(resp['meta']['ts'])}
+    resp = self.dump({'source':'XposeDump'},**form)
+    return json.dumps(resp,indent=1),{'Content-Type':'text/json','Content-Disposition':'attachment; filename="xpose-dump.json"','Last-Modified':http_ts(resp['meta']['ts'])}
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
@@ -200,7 +188,7 @@ No input expected. Two phases:
 #----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     r"""
-No input expected.
+Input must be a JSON formatted dump from another Xpose instance (or an empty dictionary).
     """
 #----------------------------------------------------------------------------------------------------------------------
     dump = self.parse_input()
@@ -233,7 +221,7 @@ Main components:
   """
 #----------------------------------------------------------------------------------------------------------------------
   from .main import XposeMain,XposeAttach
-  # retrieve configuration -> cats, routes, release, upgrades:list[]
+  # retrieve configuration -> cats, routes, release, upgrades
   assert config.is_file()
   cfg:dict[str,Any] = {}; exec(config.read_text(),cfg)
   cats:Path = Path(cfg['cats'])

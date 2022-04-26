@@ -59,7 +59,8 @@ from .utils import CGIMixin, rebase, http_ts
 from .utils import get_config,set_config # not used, but made available
 assert hasattr(Path,'hardlink_to'), 'You are using a version of python<3.10; try the fix below'
 # Path.hardlink_to = lambda self,target: Path(target).link_to(self)
-#sqlite3.register_converter('json',json.loads)
+sqlite3.register_converter('JSON',json.loads)
+sqlite3.register_adapter(dict,json.dumps)
 sqlite3.enable_callback_tracebacks(True)
 
 #======================================================================================================================

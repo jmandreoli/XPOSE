@@ -28,8 +28,7 @@ class Xpose {
     window.addEventListener('beforeunload',(e)=>{ if (this.dirty) {e.preventDefault();e.returnValue=''} })
   }
   addView (name,view) {
-    view.error = (label,x) => this.error(`${name}:${label}`,x)
-    view.ajaxError = (err) => this.ajaxError(err)
+    view.onerror = (err) => this.onerror(name,err)
     view.progressor = (label) => this.progressor(`${name}:${label}`)
     view.variant = this.variant
     view.toggle_variant = () => this.toggle_variant()
@@ -67,14 +66,10 @@ class Xpose {
       close:()=>{this.el_progress.removeChild(div)}
     }
   }
-  ajaxError (err) {
-    let errText = null
-    if (err.response) { errText = `Server error ${err.response.status} ${err.response.statusText}\n${err.response.data}` }
-    else if (err.request) { errText = `No response received from Server\n${err.request.url}` }
-    else { errText = err.message}
-    this.error('ajax',errText)
+  async onerror (label,err) {
+    this.views.console.display(this.current,`ERROR[${label}]: ${err.name}\n${err.message}\n${err.stack}`)
+    throw err // so it still appears in the js console
   }
-  error (label,x) { this.views.console.display(this.current,`ERROR: ${label}\n${x===null?'':x}`) }
   toggle_variant () { document.cookie=`xpose-variant=${this.variant?'':'shadow'}`;window.location.reload() }
   render() {
     {
@@ -108,7 +103,7 @@ class consoleView {
     this.el_main = addElement(this.toplevel,'textarea',{class:'console caution'})
     {
       const button = addJButton(this.toplevel,'arrowreturnthick-1-w',{class:'caution'})
-      button.addEventListener('click',()=>{this.close()})
+      button.addEventListener('click',()=>this.close())
     }
     this.origin = null
   }

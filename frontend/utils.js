@@ -52,6 +52,11 @@ function human_size (size) {
 
 // short-hands
 
+function encodeURIqs(uri,parm) {
+  const q = Object.entries(parm).map((x)=>`${encodeURIComponent(x[0])}=${encodeURIComponent(x[1])}`).join('&')
+  return `${uri}?${q}`
+}
+
 function addElement(container,tag,attrs) {
 	const el = document.createElement(tag)
 	if (attrs) { for (const [k,v] of Object.entries(attrs)) {el.setAttribute(k,v)} }
@@ -72,4 +77,13 @@ function unsavedConfirm () { return window.confirm('Unsaved changes will be lost
 function deleteConfirm () { return window.confirm('Are you sure you want to delete this entry ?') }
 function noopAlert () { window.alert('Nothing to save !') }
 
-export { upload, human_size, addElement, addJButton, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert }
+class AjaxError extends Error {
+  name = 'ajax'
+  constructor (err) {
+    if (err.response) { super(`Server error ${err.response.status} ${err.response.statusText}\n${err.response.data}`) }
+    else if (err.request) { super(`No response received from Server\n${err.request.url}`) }
+    else { super(err.message) }
+  }
+}
+
+export { upload, human_size, encodeURIqs, addElement, addJButton, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert, AjaxError }

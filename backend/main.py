@@ -23,11 +23,6 @@ An instance of this class is a CGI resource managing the index database of an Xp
   """
 #======================================================================================================================
 
-  sql_oid = '''SELECT oid,version,cat,Short.value as short,Entry.value as value,attach,access
-    FROM Entry LEFT JOIN Short ON Short.entry=oid
-    WHERE oid=?'''
-  r"""The SQL query to retrieve an entry given its oid"""
-
   def __init__(self,authoriser:Callable[[str,Path],None]=(lambda level,path: None),attach_namer:Callable[[int],str]=default_attach_namer):
     self.authoriser = authoriser
     self.attach_namer = attach_namer
@@ -42,31 +37,16 @@ An instance of this class is a CGI resource managing the index database of an Xp
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input is expected as an (encoded) form with a single field. The field must be either of
-
-* ``sql``: value must denote an SQLite query of type ``SELECT`` only. Output is the JSON formatted list of rows returned by the query. Each item in the list is a dictionary.
-* ``oid``: value must denote the key of a unique entry. Output is the corresponding JSON formatted entry, as a dictionary.
+Input is expected as an (encoded) form with one field ``sql`` whose value is a sql query (SELECT only), plus fields to fill the named parameters in that query.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    def select_all(*a):
-      with self.connect() as conn:
-        conn.row_factory = sqlite3.Row
-        return [dict(r) for r in conn.execute(*a)], self.index_db.stat().st_mtime
     form = self.parse_qsl()
-    resp,ts = '',None
-    if (sql:=form.get('sql')) is not None:
-      sql = sql.strip()
-      assert sql.lower().startswith('select ')
-      resp,ts = select_all(sql)
-      resp = json.dumps(resp)
-    elif (oid:=form.get('oid')) is not None:
-      oid = int(oid)
-      (r,),ts = select_all(self.sql_oid,(oid,))
-      r['short'] = r['short'].replace('"',r'\"')
-      r['access'] = (lambda x: 'null' if x is None else f'"{x}"')(r['access'])
-      resp = '{{"oid":{oid},"version":{version},"cat":"{cat}","short":"{short}","value":{value},"attach":"{attach}","access":{access}}}'.format(**r)
-    else: http_raise(HTTPStatus.NOT_FOUND)
-    return resp, {'Content-Type':'text/json','Last-Modified':http_ts(ts)}
+    sql = form['sql'].strip()
+    assert sql.lower().startswith('select ')
+    with self.connect(detect_types=sqlite3.PARSE_COLNAMES) as conn:
+      conn.row_factory = sqlite3.Row
+      resp = [dict(r) for r in conn.execute(sql,form)]
+      return json.dumps(resp), {'Content-Type':'text/json','Last-Modified':http_ts(self.index_db.stat().st_mtime)}
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
@@ -123,7 +103,7 @@ Input is expected as an (encoded) form with a single field ``path``.
     form = self.parse_qsl()
     path,level = self.attach.getpath(form['path'])
     content = self.attach.ls(path)
-    if level==0: content = [x for x in content if not x[0].endswith('.htaccess')] # XXXX specific to one authoriser, may use .xpose-hide-filename
+    if level==0: content = [x for x in content if not x[0].endswith('.htaccess')] # XXXX specific to one authoriser, may use .xpose-hide-filename, also in patch
     return json.dumps({'content':content,'version':self.version(path),'toplevel':level==0}),{'Content-Type':'text/json'}
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -139,6 +119,7 @@ Input is expected as a JSON encoded object with fields ``path``, ``version`` and
       if self.version(path) != version: http_raise(HTTPStatus.CONFLICT)
       errors = [err for op in ops if (err:=self.attach.do(path,op['src'].strip(),op['trg'].strip(),bool(op['is_new']))) is not None]
       content = self.attach.ls(path)
+      if level==0: content = [x for x in content if not x[0].endswith('.htaccess')]
       version = self.version(path)
     return json.dumps({'content':content,'version':version,'toplevel':level==0,'errors':errors}), {'Content-Type':'text/json'}
 
