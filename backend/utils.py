@@ -4,6 +4,11 @@
 # Purpose:              Xpose: misc utilities
 #
 
+r"""
+:mod:`xpose.utils` --- miscellaneous utilities
+==============================================
+"""
+
 import sys,os,json,re
 from pathlib import Path
 from functools import cached_property, singledispatch

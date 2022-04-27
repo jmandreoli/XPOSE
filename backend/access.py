@@ -4,11 +4,16 @@
 # Purpose:              Xpose: access control operations
 #
 
+r"""
+:mod:`xpose.access` --- access control operations
+=================================================
+"""
+
 import os,re
 from functools import cached_property
 from pathlib import Path
 from lxml.etree import fromstring as xml
-from typing import Union, Callable, Dict, Any
+from typing import Union, Optional, Callable, Dict, Any
 
 #======================================================================================================================
 class Credentials:
@@ -20,16 +25,19 @@ An instance of this class extracts credentials recognised by Apache from the CGI
   ldap_group_key = 'AUTHENTICATE_MEMBEROF'
   user_key = 'REMOTE_USER'
   @cached_property
-  def user(self): return os.environ.get(self.user_key)
+  def user(self)->Optional[str]: return os.environ.get(self.user_key)
   @cached_property
-  def ldap_user(self): return os.environ.get(self.ldap_user_key)
+  def ldap_user(self)->Optional[str]: return os.environ.get(self.ldap_user_key)
   @cached_property
-  def ldap_groups(self): return {} if (groups:=os.environ.get(self.ldap_group_key)) is None else dict((g,True) for g in groups.split('; '))
+  def ldap_groups(self)->dict[str,bool]: return {} if (groups:=os.environ.get(self.ldap_group_key)) is None else dict((g,True) for g in groups.split('; '))
 
 #======================================================================================================================
 class Accessor:
   r"""
-An instance of this class manages access to the xpose instances. This implementation is based on the apache authorisation framework. Methods :meth:`directive` and :meth:`check` depend on the authorisation provider type, and must be defined in subclasses.
+An instance of this class manages access to the xpose instances. This implementation is based on the apache authorisation framework.
+
+:param directives: mapping each access level to an access control directive (must be acceptable in ``.htaccess`` files)
+:param credentials: the credential object against which the directives are checked
   """
 #======================================================================================================================
 
@@ -37,7 +45,7 @@ An instance of this class manages access to the xpose instances. This implementa
   _check:dict[str,Callable[[Credentials],bool]]
   _checked: dict[str,bool]
 
-  def __init__(self,directives:dict[str,str],credentials:Credentials=None):
+  def __init__(self,directives:dict[str,str],credentials:Optional[Credentials]=None):
     def check_(directive):
       def check_base(directive,pat=re.compile(r'^Require\s+(\S+)(?:\s+(.*))?$')):
         if '\n' in directive: raise Exception('Single line clause expected')

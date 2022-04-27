@@ -4,12 +4,29 @@
 # Purpose:              Xpose: initialisation
 #
 
+r"""
+:mod:`xpose.initial` --- initialisation
+=======================================
+
+This file can be directly executed as::
+
+   PYTHONPATH=<path-to-xpose-package> <python-exe> -m xpose.initial <arguments>
+
+where
+
+* the ``PYTHONPATH`` enviroment variable must give access to the :mod:`xpose` package
+* the python executable must be the same as the one used by the cgi-script to install
+* the meaning of the arguments can be obtained by passing option ``-h`` or ``--help``
+"""
+
+
 import sys, json, io, traceback
 from pathlib import Path
 from functools import partial
+from contextlib import contextmanager
 
 #======================================================================================================================
-def _initial(_path:str,_config:str,_cgi_script:str,_cgi_url:str,_source:str):
+def initial(_path:str,_config:str,_cgi_script:str,_cgi_url:str,_source:str=None):
   r"""
 Xpose instance initialisation.
 
@@ -17,7 +34,7 @@ Xpose instance initialisation.
 :param _config: a path to an existing python file containing the configuration of the instance
 :param _cgi_script: a path where the cgi script for the management of the instance will be created
 :param _cgi_url: a url invoking *cgi_script*
-:param _source:
+:param _source: a url from which to retrieve an initial dump of entries (if not :const:`None`)
   """
 #======================================================================================================================
   path = Path(_path).resolve()
@@ -35,18 +52,27 @@ XposeServer().setup('{path}').process_cgi()'''
   cgi_script.unlink(missing_ok=True)
   if _source is None: body = '{}'
   else:
-    body = http_request('GET',_source).data
+    with http_request('GET',_source) as resp: body = resp.read().decode()
     body_ = json.loads(body)
     assert 'listing' in body_ and 'meta' in body_ and 'user_version' in body_['meta']
   try:
     cgi_script.write_text(init);cgi_script.chmod(0o555)
-    print(http_request('PUT',_cgi_url,body=body,headers={'Content-Type':'application/json'}).data)
+    with http_request('PUT',_cgi_url,body=body,headers={'Content-Type':'application/json'}) as resp:
+      print(resp.read().decode())
   finally:
     cgi_script.unlink(missing_ok=True)
   cgi_script.symlink_to(path/'route.py')
 
 #----------------------------------------------------------------------------------------------------------------------
-def http_request(method:str,url:str,**ka): # thin layer around http.client.HTTPConnection.request
+@contextmanager
+def http_request(method:str,url:str,**ka):
+  r"""
+A thin layer around :meth:`http.client.HTTPConnection.request`. Supports *url* in ``http``, ``https`` schemes as well as direct file path names. Works as a python context yielding a response object similar to :class:`http.client.HTTPResponse`. With http(s) scheme, the host can contain ``@`` to provide basic authentication in the form of a login-password pair separated by ``:``  (if the password is ommitted, it is read from the terminal), e.g. ``https://joe@example.com/some/path?some=query``.
+
+:param method: HTTP method name (case ignored)
+:param url: url to open
+:param ka: same as for :meth:`http.client.HTTPConnection.request`
+  """
 #----------------------------------------------------------------------------------------------------------------------
   from urllib.parse import urlparse, urlunparse
   from http.client import HTTPConnection, HTTPSConnection
@@ -54,9 +80,9 @@ def http_request(method:str,url:str,**ka): # thin layer around http.client.HTTPC
   from base64 import b64encode
   def auth(factory,loc):
     loc = loc.split('@',1)
-    if len(loc)==1: return loc[0]
+    if len(loc)==1: return factory(loc[0])
     cred = loc[0].split(':',1)
-    if len(cred)==1: cred = cred[0],getpass(f'Password for {cred[0]@loc[1]}> ')
+    if len(cred)==1: cred = cred[0],getpass(f'Password for {cred[0]}@{loc[1]}> ')
     ka.setdefault('headers',{})['Authorization'] = f'Basic {b64encode(b":".join(x.encode() for x in cred)).decode()}'
     return factory(loc[1])
   p = urlparse(url)
@@ -64,10 +90,9 @@ def http_request(method:str,url:str,**ka): # thin layer around http.client.HTTPC
   try:
     conn.request(method,urlunparse(('','')+p[2:]),**ka)
     resp = conn.getresponse()
-    resp.data = resp.read().decode()
-    assert resp.status==200, (resp.status,resp.reason,resp.data)
+    assert resp.status<300, (resp.status,resp.reason,resp.read().decode())
+    yield resp
   finally: conn.close()
-  return resp
 
 #----------------------------------------------------------------------------------------------------------------------
 class FileConnection:
@@ -94,4 +119,4 @@ if __name__=='__main__':
   parser.add_argument('cgi_url',metavar='CGI-URL',help='URL to invoke CGI-SCRIPT')
   parser.add_argument('source',metavar='SOURCE',nargs='?',help='file path or URL to a JSON formatted string suitable for Xpose load, loaded after initialisation',default=None)
   a = parser.parse_args(sys.argv[1:])
-  _initial(a.path,a.config,a.cgi_script,a.cgi_url,a.source)
+  initial(a.path,a.config,a.cgi_script,a.cgi_url,a.source)

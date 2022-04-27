@@ -10,6 +10,13 @@ Welcome to XPOSE's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   mod_main.rst
+   mod_server.rst
+   mod_attach.rst
+   mod_access.rst
+   mod_initial.rst
+   mod_utils.rst
+
 Available types and functions
 -----------------------------
 

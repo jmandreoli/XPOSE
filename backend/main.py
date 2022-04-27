@@ -4,6 +4,11 @@
 # Purpose:              Xpose: index database operations
 #
 
+r"""
+:mod:`xpose.main` --- index database operations
+===============================================
+"""
+
 import sqlite3,json
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +24,7 @@ class XposeMain (XposeBase,WithAttachMixin,CGIMixin):
 An instance of this class is a CGI resource managing the index database of an Xpose instance.
 
 :param authoriser: callable taking as input an access level and a path, and restricting access to that path to that level
-:param attach_namer: callable taking as input an entry oid and returning a string suitable as a path name for attachment
+:param attach_namer: callable taking as input an entry oid and returning a string suitable as a path name for attachments of that entry
   """
 #======================================================================================================================
 
@@ -37,7 +42,7 @@ An instance of this class is a CGI resource managing the index database of an Xp
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input is expected as an (encoded) form with one field ``sql`` whose value is a sql query (SELECT only), plus fields to fill the named parameters in that query.
+Input: url-encoded form with one field ``sql`` whose value is a sql query (SELECT only), plus fields to fill the named parameters in that query.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
@@ -51,7 +56,7 @@ Input is expected as an (encoded) form with one field ``sql`` whose value is a s
 #----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     r"""
-Input is expected as any JSON encoded entry. Validation is not performed.
+Input: JSON encoded dict, either inserted as a new entry in Xpose or used to update an existing one (depending on the presence of attribute ``oid``). No validation is performed.
     """
 #----------------------------------------------------------------------------------------------------------------------
     entry = self.parse_input()
@@ -66,13 +71,13 @@ Input is expected as any JSON encoded entry. Validation is not performed.
     with self.connect() as conn:
       try: oid, = conn.execute(*sql).fetchone()
       except sqlite3.IntegrityError: http_raise(HTTPStatus.CONFLICT)
-      short,attach = conn.execute('SELECT Short.value,Entry.attach FROM Entry,Short WHERE oid=? AND entry=oid',(oid,)).fetchone()
+      short,attach = conn.execute('SELECT short,attach FROM EntryShort WHERE oid=?',(oid,)).fetchone()
     return json.dumps({'oid':oid,'version':version+1,'short':short,'attach':attach}), {'Content-Type':'text/json'}
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_delete(self):
     r"""
-Input is expected as a JSON encoded object with a single field ``oid``, which must denote the primary key of an Entry.
+Input: JSON encoded dict with a single key ``oid``, which must denote the primary key of an Entry to be deleted.
     """
 #----------------------------------------------------------------------------------------------------------------------
     oid = self.parse_input()['oid']
@@ -97,7 +102,7 @@ An instance of this class is a CGI resource managing the Xpose attachment folder
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input is expected as an (encoded) form with a single field ``path``.
+Input: url-encoded form with a single field ``path``.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
@@ -109,7 +114,7 @@ Input is expected as an (encoded) form with a single field ``path``.
 #----------------------------------------------------------------------------------------------------------------------
   def do_patch(self):
     r"""
-Input is expected as a JSON encoded object with fields ``path``, ``version`` and ``ops``, the latter being a list of operations. An operation is specified as an object with fields ``src``, ``trg`` (relative paths) and ``is_new`` (boolean).
+Input: JSON encoded dict with keys ``path``, ``version`` and ``ops``, the latter being a list of operations. An operation is specified as a dict with keys ``src``, ``trg`` (relative paths) and ``is_new`` (boolean).
     """
 #----------------------------------------------------------------------------------------------------------------------
     content = self.parse_input()
@@ -117,7 +122,7 @@ Input is expected as a JSON encoded object with fields ``path``, ``version`` and
     with self.connect(isolation_level='IMMEDIATE'): # ensures isolation of attachment operations, no transaction is performed
       path,level = self.attach.getpath(path)
       if self.version(path) != version: http_raise(HTTPStatus.CONFLICT)
-      errors = [err for op in ops if (err:=self.attach.do(path,op['src'].strip(),op['trg'].strip(),bool(op['is_new']))) is not None]
+      errors = [err for op in ops if (err:=self.attach.perform(path,op['src'].strip(),op['trg'].strip(),bool(op['is_new']))) is not None]
       content = self.attach.ls(path)
       if level==0: content = [x for x in content if not x[0].endswith('.htaccess')]
       version = self.version(path)
@@ -126,7 +131,7 @@ Input is expected as a JSON encoded object with fields ``path``, ``version`` and
 #----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
     r"""
-Input is expected as an octet stream.
+Input: octet stream of uploaded file chunk + optionally, url-encoded form with single field ``target``.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()

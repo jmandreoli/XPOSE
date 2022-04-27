@@ -3,6 +3,12 @@
 # Language:             python
 # Purpose:              Xpose: instance management operations
 #
+
+r"""
+:mod:`xpose.server` --- instance management operations
+======================================================
+"""
+
 import sys,sqlite3,shutil,json
 from pathlib import Path
 from typing import Union, Callable, Any, Optional
@@ -78,7 +84,7 @@ An instance of this class is a CGI resource managing a whole Xpose instance.
     self.attach_namer = attach_namer
 
 #----------------------------------------------------------------------------------------------------------------------
-  def dump(self,meta:dict[str,Optional[str]]=None,**queries)->dict[str,Any]:
+  def dump(self,meta:Optional[dict[str,Optional[str]]]=None,**queries)->dict[str,Any]:
     r"""
 Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query pairs). Returns a dictionary with the same keys and values set to the results of the queries. The dictionary *meta* holds a description of the batch and its execution and is added to the result with key ``meta``.
     """
@@ -130,7 +136,7 @@ Loads some entries in the index database. Entries are validated, and behaviour i
       conn.executemany(sql,listing_)
 
 #----------------------------------------------------------------------------------------------------------------------
-  def precompute_trigger(self,table:str,cat:str,defn:str,when:str=None):
+  def precompute_trigger(self,table:str,cat:str,defn:str,when:Optional[str]=None):
     r"""
 Declares a trigger on ``INSERT`` or ``UPDATE`` operations on the ``Entry`` table, when the ``cat`` field is *cat*. The triggered action must be an insertion into *table*.
 
@@ -154,16 +160,15 @@ END'''
     script = ';\n'.join(create_trigger(op) for op in ('INSERT','UPDATE OF value'))
     with self.connect() as conn: conn.executescript(script)
 
+#----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input is expected as an (encoded) form specifying arguments for a :meth:`dump` call.
-
-* If a field key starts with ``sql:`` (ignoring case), then the rest of key is considered the label of an sql query which is either the value of the field, or, if the key is ``SQL:``, an extra clause for a full-information dump query.
-* Otherwise, the field key-value pair provides arguments passed to the queries.
+Input: url-encoded form where each field specifies a label and associated sql query pair, passed to method :meth:`dump`.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
-    resp = self.dump({'source':'XposeDump'},**form)
+    meta = {'source':form.pop('meta','XposeDump')} # meta field could carry json encoded dict rather than just source name
+    resp = self.dump(meta,**form)
     return json.dumps(resp,indent=1),{'Content-Type':'text/json','Content-Disposition':'attachment; filename="xpose-dump.json"','Last-Modified':http_ts(resp['meta']['ts'])}
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -172,10 +177,12 @@ Input is expected as an (encoded) form specifying arguments for a :meth:`dump` c
 No input expected. Two phases:
 
 * Phase 1: real->shadow
-  * when self contains "config.py" file: self is the real instance, target=./shadow
+
+    * when the root contains a ``config.py`` file: *self* is the real instance, *target* is ``./shadow``
 
 * Phase 2: shadow->real
-  * when self does not contain "config.py": self is the shadow instance (must be named "shadow"), target=..
+
+    * when the root does not contain a ``config.py`` file: *self* is the shadow instance (must be named ``shadow``), *target* is ``..``
     """
 #----------------------------------------------------------------------------------------------------------------------
     config = self.root/'config.py'
@@ -188,7 +195,7 @@ No input expected. Two phases:
 #----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     r"""
-Input must be a JSON formatted dump from another Xpose instance (or an empty dictionary).
+Input: JSON formatted dump from another Xpose instance (or an empty dictionary).
     """
 #----------------------------------------------------------------------------------------------------------------------
     dump = self.parse_input()
@@ -201,18 +208,21 @@ def initial(config:Path,target:Path,target_is_shadow:bool,dump:Optional[dict]):
   r"""
 Main components:
 
-* in both real and shadow instances:
-* index.db: index database file
-* attach: attachment directory
-* .routes: route directory
+#. in both real and shadow instances:
 
-* in real instance:
-* config.py: symlink to readable python file containing configuration code
-* route.py: generated python file for cgi-bin script to symlink to
-* cats: fixed copy of cats directory from config, only updated in Phase 2
+   * ``index.db``: index database file
+   * ``attach``: attachment directory
+   * ``.routes``: route directory
 
-* in shadow instance:
-* cats: symlink to directory from config
+#. in real instance:
+
+   * ``config.py``: symlink to readable python file containing configuration code
+   * ``route.py``: generated python file for cgi-bin script to symlink to
+   * ``cats``: fixed copy of cats directory from config, only updated in Phase 2
+
+#. in shadow instance:
+
+   * ``cats``: symlink to cats directory from config
 
 :param config: path to config file
 :param target: path to directory to initialise

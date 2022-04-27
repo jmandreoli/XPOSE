@@ -44,11 +44,11 @@ For each category ``{cat}``, the following files are expected in folder ``cats``
 
 The following sqlite functions are made available in contexts where they are needed:
 
-* :func:`create_attach`(*oid*): called when an entry is created to set its ``attach`` field in the index, given its *oid*
-* :func:`delete_attach`(*oid*): called when an entry with a given *oid* field is deleted
-* :func:`authorise`(*level*): called to check access to an entry given its *level* (extracted from field ``access`` in the index)
-* :func:`authoriser`(*level*,*path*): called to set an access control to *path* to the given *level*
-* :func:`apply_template`(*tmpl*,*err_tmpl*,*rendering*,*args*): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
+* :func:`create_attach` ( *oid* ): called when an entry is created to set its ``attach`` field in the index, given its *oid*
+* :func:`delete_attach` ( *oid* ): called when an entry with a given *oid* field is deleted
+* :func:`authorise` ( *level* ): called to check access to an entry given its *level* (extracted from field ``access`` in the index)
+* :func:`authoriser` ( *level*, *path* ): called to set an access control to *path* to the given *level*
+* :func:`apply_template` ( *tmpl*, *err_tmpl*, *rendering*, *args* ): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
 """
 
 import sqlite3,json
@@ -118,7 +118,7 @@ An instance of this class is a CGI resource managing (restricted) client access 
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input is expected as an (encoded) form with one field ``sql`` whose value is the name of a prepared sql query, plus fields to fill the named parameters in that query.
+Input: url-encoded form with one field ``sql`` whose value is the name of a prepared sql query, plus fields to fill the named parameters in that query.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
