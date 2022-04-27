@@ -5,7 +5,7 @@
 #
 
 r"""
-:mod:`xpose` --- A JSON database manager
+:mod:`XPOSE` --- A JSON database manager
 ========================================
 
 An Xpose instance is a directory (root) containing the following members:
@@ -38,9 +38,9 @@ The index database has the following tables:
 
 For each category ``{cat}``, the following files are expected in folder ``cats``:
 
-* ``cats/{cat}/schema.json``: `json schema <https://json-schema.org/>`_ describing the entries of category {cat}
-* ``cats/{cat}/init.py``: python file initialising category {cat} on server (run once for each version of the xpose instance)
-* ``cats/{cat}/{*}`` (optional): utility files for category {cat}, esp. `genshi templates <https://genshi.edgewall.org/>`_
+* ``cats/{cat}/schema.json``: `json schema <https://json-schema.org/>`_ describing the entries of category ``{cat}``
+* ``cats/{cat}/init.py``: python file initialising category ``{cat}`` on server (run once for each version of the xpose instance)
+* ``cats/{cat}/{*}`` (optional): utility files for category ``{cat}``, esp. `genshi templates <https://genshi.edgewall.org/>`_
 
 The following sqlite functions are made available in contexts where they are needed:
 
@@ -49,6 +49,36 @@ The following sqlite functions are made available in contexts where they are nee
 * :func:`authorise` ( *level* ): called to check access to an entry given its *level* (extracted from field ``access`` in the index)
 * :func:`authoriser` ( *level*, *path* ): called to set an access control to *path* to the given *level*
 * :func:`apply_template` ( *tmpl*, *err_tmpl*, *rendering*, *args* ): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
+
+An Xpose instance always has a shadow instance in directory ``shadow`` (from the root). Their main components are:
+
+#. in both real and shadow instances:
+
+   * ``index.db``: index database file
+   * ``attach``: attachment directory
+   * ``.routes``: route directory
+
+#. in real instance:
+
+   * ``config.py``: symlink to readable python file containing configuration code
+   * ``route.py``: generated python file for cgi-bin script to symlink to
+   * ``cats``: fixed copy of cats directory from config, only updated in Phase 2
+
+#. in shadow instance:
+
+   * ``cats``: symlink to cats directory from config
+
+Which of the real or shadow instance is served depends on a cookie ``xpose-variant``.
+
+The config file must define the following variables:
+
+* *cats* (:class:`str`): a file path to a folder containing all the meta information (cats) of the xpose instance
+* *routes* (:class:`dict[str,XposeBase]`): a simple mapping between routes (from PATH_INFO) and corresponding resource (defaults exist for ``main``, ``attach``, and ``manage``)
+* *release* (:class:`int`): the current release of the data
+* *upgrade_{n}* (:class:`Callable[[list[Entry]],None]`): invoked to upgrade the list of entries for each release *n* strictly below the current one
+
+Available types and functions
+-----------------------------
 """
 
 import sqlite3,json
@@ -110,6 +140,9 @@ An instance of this class is a CGI resource managing (restricted) client access 
     self.prepared = prepared
 
   def connect(self,**ka):
+    r"""
+Same as base, but adds sqlite functions ``authorise`` and ``xpose_template``.
+    """
     conn = super().connect(**ka)
     conn.create_function('authorise',1,self.authorise,deterministic=True)
     conn.create_function('xpose_template',4,(lambda tmpl,err_tmpl,rendering,args,t=self.cats.apply_template:t(tmpl,err_tmpl,rendering,xpose=self,**json.loads(args))),deterministic=True)

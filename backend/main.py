@@ -5,7 +5,7 @@
 #
 
 r"""
-:mod:`xpose.main` --- index database operations
+:mod:`XPOSE.main` --- index database operations
 ===============================================
 """
 
@@ -33,6 +33,9 @@ An instance of this class is a CGI resource managing the index database of an Xp
     self.attach_namer = attach_namer
 
   def connect(self,**ka):
+    r"""
+Same as base, but adds sqlite functions ``create_attach``, ``delete_attach`` and ``authoriser``
+    """
     conn = super().connect(**ka)
     conn.create_function('create_attach',1,self.attach_namer,deterministic=True)
     conn.create_function('delete_attach',1,self.attach.rmdir,deterministic=True)

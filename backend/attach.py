@@ -5,7 +5,7 @@
 #
 
 r"""
-:mod:`xpose.attach` --- attachment folder operations
+:mod:`XPOSE.attach` --- attachment folder operations
 ====================================================
 """
 

@@ -5,13 +5,13 @@
 #
 
 r"""
-:mod:`xpose.utils` --- miscellaneous utilities
+:mod:`XPOSE.utils` --- miscellaneous utilities
 ==============================================
 """
 
 import sys,os,json,re
 from pathlib import Path
-from functools import cached_property, singledispatch
+from functools import singledispatch
 from datetime import datetime
 from http import HTTPStatus
 from urllib.parse import parse_qsl,urljoin

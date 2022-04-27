@@ -67,8 +67,7 @@ class DetailedEventSource {
       header.insertCell().innerHTML = '<span> Sources: </span>'
       this.sources = Object.fromEntries(config.sources.map((src)=>{
         const td = header.insertCell(); td.innerHTML = src.id
-        td.style.backgroundColor = src.options.backgroundColor ||= 'black'
-        td.style.color = src.options.textColor ||= 'white'
+        Object.assign(td.style,{backgroundColor:src.options.backgroundColor||='black',color:src.options.textColor||='white'})
         return [src.id,src]
       }))
     }
@@ -88,23 +87,23 @@ class DetailedEventSource {
     calendar.addEventSource({id:config.id,events:(info,success,failure)=>this.events(info,success,failure)})
   }
 
-  events (info,success,failure) {
+  events (info) {
     const start = new Date(info.start).getFullYear()
     const end_ = new Date(info.end);end_.setSeconds(end_.getSeconds()-1);const end = end_.getFullYear()
     const years = `${start}-${end}`
     if (this.currentYears==years||this.currentYears=='') {return}
-    this.calendar.el.style.pointerEvents='none' // avoids bursts of updates, restored after events lookup
     this.currentYears = ''
     console.log('Loading',years)
-    this.getEvents(start,end)
-      .then((data)=>{success(this.process(data));this.currentYears=years})
-      .catch((error)=>{failure(error);this.el_details.innerHTML=`<pre>${error.message}\n${error.response?error.response.data:''}</pre>`})
+    this.calendar.el.style.pointerEvents='none' // avoids bursts of updates, restored after events lookup
+    return this.getEvents(start,end)
+      .then((data)=>{const events=this.process(data);this.currentYears=years;return events})
+      .catch((error)=>{this.el_details.innerHTML=`<pre>${error.message}\n${error.response?error.response.data:''}</pre>`;throw error})
       .finally(()=>{this.calendar.el.style.pointerEvents='auto'})
   }
 
   process (data) {
     this.el_details.innerHTML = ''
-    const events = data.map((row)=>this.processRow(row))
+    const events = data.map(row=>this.processRow(row))
     if (this.transformMarkdown) { this.transformMarkdown(Array.from(this.el_details.getElementsByClassName('transform-markdown'))) }
     if (this.transformMath) { this.transformMath(Array.from(this.el_details.getElementsByClassName('transform-math'))) }
     return events
@@ -118,9 +117,8 @@ class DetailedEventSource {
     const td = tbody.insertRow(0).insertCell()
     td.colSpan = 2; td.className = 'setting'
     const options = this.sources[row.source].options
-    for (const o in options) { ev[o] = options[o] }
-    td.style.backgroundColor = options.backgroundColor
-    td.style.color = options.textColor
+    Object.assign(ev,options)
+    Object.assign(td.style,{backgroundColor:options.backgroundColor,color:options.textColor})
     const extra = tbody.dataset.left||''
     let status = tbody.dataset.right||''
     if (status) {status = `<div class="status">${status}</div>`}

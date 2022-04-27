@@ -5,7 +5,7 @@
 #
 
 r"""
-:mod:`xpose.access` --- access control operations
+:mod:`XPOSE.access` --- access control operations
 =================================================
 """
 

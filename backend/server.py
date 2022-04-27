@@ -5,7 +5,7 @@
 #
 
 r"""
-:mod:`xpose.server` --- instance management operations
+:mod:`XPOSE.server` --- instance management operations
 ======================================================
 """
 
@@ -63,7 +63,7 @@ RoutingCode = f'''#!{sys.executable}
 from os import environ, umask
 from http.cookies import SimpleCookie
 from pathlib import Path
-from xpose import get_config
+from {__package__} import get_config
 umask(0o7)
 variant = '.' if (morsel:=SimpleCookie(environ.get('HTTP_COOKIE','')).get('xpose-variant')) is None else morsel.coded_value
 path = Path(__file__).resolve().parent/variant
@@ -178,11 +178,11 @@ No input expected. Two phases:
 
 * Phase 1: real->shadow
 
-    * when the root contains a ``config.py`` file: *self* is the real instance, *target* is ``./shadow``
+  * when the root contains a ``config.py`` file: *self* is the real instance, *target* is ``./shadow``
 
 * Phase 2: shadow->real
 
-    * when the root does not contain a ``config.py`` file: *self* is the shadow instance (must be named ``shadow``), *target* is ``..``
+  * when the root does not contain a ``config.py`` file: *self* is the shadow instance (must be named ``shadow``), *target* is ``..``
     """
 #----------------------------------------------------------------------------------------------------------------------
     config = self.root/'config.py'
@@ -206,23 +206,7 @@ Input: JSON formatted dump from another Xpose instance (or an empty dictionary).
 #----------------------------------------------------------------------------------------------------------------------
 def initial(config:Path,target:Path,target_is_shadow:bool,dump:Optional[dict]):
   r"""
-Main components:
-
-#. in both real and shadow instances:
-
-   * ``index.db``: index database file
-   * ``attach``: attachment directory
-   * ``.routes``: route directory
-
-#. in real instance:
-
-   * ``config.py``: symlink to readable python file containing configuration code
-   * ``route.py``: generated python file for cgi-bin script to symlink to
-   * ``cats``: fixed copy of cats directory from config, only updated in Phase 2
-
-#. in shadow instance:
-
-   * ``cats``: symlink to cats directory from config
+Initialises an Xpose instance.
 
 :param config: path to config file
 :param target: path to directory to initialise

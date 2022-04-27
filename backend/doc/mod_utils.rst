@@ -1,4 +1,4 @@
-.. automodule:: xpose.utils
+.. automodule:: XPOSE.utils
    :members:
    :member-order: bysource
    :show-inheritance:

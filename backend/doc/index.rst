@@ -3,8 +3,13 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to XPOSE's documentation!
-=================================
+XPOSE package documentation
+===========================
+
+.. automodule:: XPOSE
+   :members:
+   :member-order: bysource
+   :show-inheritance:
 
 .. toctree::
    :maxdepth: 2
@@ -16,14 +21,6 @@ Welcome to XPOSE's documentation!
    mod_access.rst
    mod_initial.rst
    mod_utils.rst
-
-Available types and functions
------------------------------
-
-.. automodule:: xpose
-   :members:
-   :member-order: bysource
-   :show-inheritance:
 
 Indices and tables
 ==================
