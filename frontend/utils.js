@@ -68,6 +68,14 @@ function addJButton(container,icon,attrs) {
   addElement(button,'span',{class:`ui-icon ui-icon-${icon}`})
   return button
 }
+function addHeadMark(val,exception,style) {
+  if (exception && exception(val)) return
+  const [div,div_] = [1,2].map(()=>document.createElement('div')); document.body.prepend(div,div_); div.innerText = val
+  const style_ = {position:'fixed',left:'0',right:'0',top:'0',zIndex:'100',backgroundColor:'pink',textAlign:'center',fontSize:'x-large'}
+  if (style) { Object.assign(style_,style) }
+  Object.assign(div.style,style_)
+  Object.assign(div_.style,{height:`${div.offsetHeight}px`})
+}
 function addText(container,data) {
   const text = document.createTextNode(data||' ')
   container.appendChild(text)
@@ -86,4 +94,4 @@ class AjaxError extends Error {
   }
 }
 
-export { upload, human_size, encodeURIqs, addElement, addJButton, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert, AjaxError }
+export { upload, human_size, encodeURIqs, addElement, addJButton, addHeadMark, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert, AjaxError }

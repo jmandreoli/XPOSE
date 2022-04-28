@@ -11,6 +11,7 @@ r"""
 
 import sys,os,json,re
 from pathlib import Path
+from contextlib import contextmanager
 from functools import singledispatch
 from datetime import datetime
 from http import HTTPStatus
@@ -133,10 +134,14 @@ An instance of this class is a bijection between the interval of whole numbers f
 #======================================================================================================================
 class Backup:
   r"""
-An instance of this class creates a context allowing transactional operations on the first level of a directory (called the root).
-A subdirectory of the root must be named, and will be used for backup. It should only be used for that purpose.
-The only allowed transactional operations take a single name (with no path separator) as input and move the file (or sub-directory) corresponding to that name from the root directory (if it exists) into the backup directory.
-If the context exits with an exception, all the files and directories affected by the transactional operations are restored, erasing new ones if needed.
+An instance of this class creates a context allowing transactional operations on the first level of a directory (called the root). A subdirectory of the root must be named, and will be used for backup. It should only be used for that purpose. The only allowed transactional operations take a single name (with no path separator) as input and move the file (or sub-directory) corresponding to that name from the root directory (if it exists) into the backup directory. If the context exits with an exception, all the files and directories affected by the transactional operations are restored, erasing new ones if needed. Example::
+
+   with Backup('mydir') as backup:
+     p1 = backup('file1') # file1 is moved (if it exists) to the backup directory; p1 is the Path object for the new file1
+     p2 = backup('dir2')
+     p1.write_text('Hello world')
+     ...
+     raise Exception() # file1 and dir2 are restored, possibly erasing the new content in p1,p2
   """
 #======================================================================================================================
   def __init__(self,p:Union[str,Path],name:str='.backup'):
@@ -168,6 +173,50 @@ If the context exits with an exception, all the files and directories affected b
     if f.is_symlink(): f.unlink()
     elif f.is_dir(): rmtree(f)
     else: f.unlink(missing_ok=True)
+
+#======================================================================================================================
+@contextmanager
+def http_request(method:str,url:str,**ka):
+  r"""
+A thin layer around :meth:`http.client.HTTPConnection.request`. Supports *url* in ``http``, ``https`` schemes as well as direct file path names. Works as a python context yielding a response object similar to :class:`http.client.HTTPResponse`. With http(s) scheme, the host specification can contain ``@`` to provide basic authentication (eventually removed from the URL) in the form of a login-password pair separated by ``:``  (if the password is omitted, it is read from the terminal), e.g. ``https://joe@example.com/some/path?some=query``.
+
+:param method: HTTP method name (case ignored)
+:param url: url to open (possibly containing ``@`` for authentication)
+:param ka: same as in method :meth:`http.client.HTTPConnection.request`
+  """
+#======================================================================================================================
+  from urllib.parse import urlparse, urlunparse
+  from http.client import HTTPConnection, HTTPSConnection
+  from functools import partial
+  from getpass import getpass
+  from base64 import b64encode
+  class FileConnection:
+    stream = path = status = reason = None
+    def __init__(self,loc): assert not loc
+    def request(self,method,path,**ka): assert method.upper()=='GET' and not ka; self.path = Path(path)
+    def getresponse(self):
+      import io, traceback
+      try: self.stream = self.path.open('rb')
+      except IOError as e: self.status = 500; self.reason = repr(e); self.read = io.BytesIO(traceback.format_exc().encode()).read
+      else: self.status = 200; self.reason = 'OK'; self.read = self.stream.read
+      return self
+    def close(self):
+      if self.stream is not None: self.stream.close()
+  def auth(factory,loc):
+    loc = loc.split('@',1)
+    if len(loc)==1: return factory(loc[0])
+    cred = loc[0].split(':',1)
+    if len(cred)==1: cred = cred[0],getpass(f'Password for {cred[0]}@{loc[1]}> ')
+    ka.setdefault('headers',{})['Authorization'] = f'Basic {b64encode(b":".join(x.encode() for x in cred)).decode()}'
+    return factory(loc[1])
+  p = urlparse(url)
+  conn = {'http':partial(auth,HTTPConnection),'https':partial(auth,HTTPSConnection),'':FileConnection}[p.scheme](p.netloc)
+  try:
+    conn.request(method,urlunparse(('','')+p[2:]),**ka)
+    resp = conn.getresponse()
+    assert resp.status<300, (resp.status,resp.reason,resp.read().decode())
+    yield resp
+  finally: conn.close()
 
 #======================================================================================================================
 # Miscellaneous

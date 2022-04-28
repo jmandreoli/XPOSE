@@ -86,7 +86,9 @@ An instance of this class is a CGI resource managing a whole Xpose instance.
 #----------------------------------------------------------------------------------------------------------------------
   def dump(self,meta:Optional[dict[str,Optional[str]]]=None,**queries)->dict[str,Any]:
     r"""
-Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query pairs). Returns a dictionary with the same keys and values set to the results of the queries. The dictionary *meta* holds a description of the batch and its execution and is added to the result with key ``meta``.
+Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query pairs). Returns a dictionary with the same keys and values set to the results of the queries. The dictionary *meta* holds a description of the batch and its execution, and is added to the result with key ``meta``. Table (view) ``EntryFull`` can be used in queries instead of ``Entry`` to produce listings suitable for method :meth:`load` (field ``attach`` is converted appropriately). When *queries* is empty, it is replaced by::
+
+   {'listing':'SELECT * FROM EntryFull'}
     """
 #----------------------------------------------------------------------------------------------------------------------
     def attach_contents(attach,root=self.attach.root):
@@ -104,11 +106,12 @@ Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query 
 #----------------------------------------------------------------------------------------------------------------------
   def load(self,listing:list):
     r"""
-Loads some entries in the index database. Entries are validated, and behaviour is transactional. The ``attach`` field in each entry must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that subfolders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
+Loads some entries in the index database. Entries are validated, and behaviour is transactional. The ``attach`` field in each *listing* entry must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that subfolders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
 
 :param listing: the list of entries to load into the index database
     """
 #----------------------------------------------------------------------------------------------------------------------
+    if not listing: return
     with self.connect() as conn:
       conn.row_factory = sqlite3.Row
       fields = tuple(field for r in conn.execute('PRAGMA table_info(Entry)') if (field:=r['name'])!='oid')
@@ -189,19 +192,19 @@ No input expected. Two phases:
     target_is_shadow = config.exists()
     if target_is_shadow is True: target = self.root/'shadow'; target.mkdir(exist_ok=True) # Phase 1
     else: assert self.root.name == 'shadow'; target = self.root.parent; config = target/'config.py' # Phase 2
-    release,n_upgrades = initial(config,target,target_is_shadow,self.dump())
-    return json.dumps({'user_version':release,'upgrades':n_upgrades}),{'Content-Type':'text/json'}
+    release,n_upgrades,n_loaded = initial(config,target,target_is_shadow,self.dump())
+    return json.dumps({'data-release':release,'upgrades':n_upgrades,'loaded':n_loaded}),{'Content-Type':'text/json'}
 
 #----------------------------------------------------------------------------------------------------------------------
   def do_put(self):
     r"""
-Input: JSON formatted dump from another Xpose instance (or an empty dictionary).
+Input: JSON formatted dump from another Xpose instance (or :const:`None`).
     """
 #----------------------------------------------------------------------------------------------------------------------
     dump = self.parse_input()
     config = self.root/'config.py'
-    release,n_upgrades = initial(config,self.root,False,dump)
-    return json.dumps({'user_version':release,'upgrades':n_upgrades}),{'Content-Type':'text/json'}
+    release,n_upgrades,n_loaded = initial(config,self.root,False,dump)
+    return json.dumps({'data-release':release,'upgrades':n_upgrades,'loaded':n_loaded}),{'Content-Type':'text/json'}
 
 #----------------------------------------------------------------------------------------------------------------------
 def initial(config:Path,target:Path,target_is_shadow:bool,dump:Optional[dict]):
@@ -228,7 +231,8 @@ Initialises an Xpose instance.
   assert isinstance(release,int) and release >= 0
   upgrades:list[Callable[[list],None]] = [cfg[f'upgrade_{n}'] for n in range(release)]
   # collect current entry listing
-  if dump:
+  if dump is None: listing = n_upgrades = n_loaded = None
+  else:
     listing = dump['listing']
     user_version = dump['meta']['user_version']
     # upgrade entries
@@ -237,7 +241,7 @@ Initialises an Xpose instance.
       assert n_upgrades>=0
       for upg in upgrades[user_version:]: upg(listing)
     else: assert n_upgrades==0 # forces any upgrade to go through shadow first
-  else: listing = []; n_upgrades = None
+    n_loaded = len(listing)
   with Backup(target) as backup:
     # set cats
     cats_ = backup('cats')
@@ -260,6 +264,6 @@ Initialises an Xpose instance.
       conn.execute(f'PRAGMA user_version = {release}')
     xpose.cats.initial(xpose=xpose)
     # load entry listing
-    xpose.load(listing)
+    if listing is not None: xpose.load(listing)
   # result
-  return release,n_upgrades
+  return release,n_upgrades,n_loaded

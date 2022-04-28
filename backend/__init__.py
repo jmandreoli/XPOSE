@@ -8,6 +8,9 @@ r"""
 :mod:`XPOSE` --- A JSON database manager
 ========================================
 
+Overall structure
+-----------------
+
 An Xpose instance is a directory (root) containing the following members:
 
 * ``index.db``: an sqlite3 database (see schema below), called the index of the instance
@@ -26,7 +29,7 @@ The index database has the following tables:
    * ``attach``: relative path in the ``attach`` folder holding the attachments of this entry
    * ``created``: creation timestamp of this entry in ISO format YYYY-MM-DD[T]HH:MM:SS
    * ``modified``: last modification timestamp of this entry in same format as ``created``
-   * ``access``: an access control key for this entry
+   * ``access``: an access control level for this entry
    * ``memo``: JSON encoded data, with no specific JSON schema, and never touched by Xpose (for use by other applications)
 
 #. Table ``Short`` with fields
@@ -36,21 +39,27 @@ The index database has the following tables:
 
 #. Other tables, triggers, views, indexes etc. can also be added and populated when categories are initialised, but they should only contain derived information.
 
+Categories
+----------
+
 For each category ``{cat}``, the following files are expected in folder ``cats``:
 
 * ``cats/{cat}/schema.json``: `json schema <https://json-schema.org/>`_ describing the entries of category ``{cat}``
-* ``cats/{cat}/init.py``: python file initialising category ``{cat}`` on server (run once for each version of the xpose instance)
-* ``cats/{cat}/{*}`` (optional): utility files for category ``{cat}``, esp. `genshi templates <https://genshi.edgewall.org/>`_
+* ``cats/{cat}/init.py``: python file initialising category ``{cat}`` on server (run once for each release of the instance data)
+* ``cats/{cat}/*`` (optional): utility files for category ``{cat}``, esp. `genshi templates <https://genshi.edgewall.org/>`_
 
 The following sqlite functions are made available in contexts where they are needed:
 
 * :func:`create_attach` ( *oid* ): called when an entry is created to set its ``attach`` field in the index, given its *oid*
 * :func:`delete_attach` ( *oid* ): called when an entry with a given *oid* field is deleted
-* :func:`authorise` ( *level* ): called to check access to an entry given its *level* (extracted from field ``access`` in the index)
+* :func:`authorise` ( *level* ): called to check access to an entry given its access *level*
 * :func:`authoriser` ( *level*, *path* ): called to set an access control to *path* to the given *level*
 * :func:`apply_template` ( *tmpl*, *err_tmpl*, *rendering*, *args* ): applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies *err_tmpl*
 
-An Xpose instance always has a shadow instance in directory ``shadow`` (from the root). Their main components are:
+Shadowing and data releases
+---------------------------
+
+An Xpose instance always has a shadow instance in directory ``shadow`` (from the root). The main role of the shadow is to provide a fully functioning instance with data, categories, routes at a possibly different release from the real instance. Once tests on the shadow are complete, its content can be copied back into the real instance. Note that attachment files are never copied between real and shadow instances (they are hard links to the same file objects). The main components of each instance are:
 
 #. in both real and shadow instances:
 
@@ -62,20 +71,20 @@ An Xpose instance always has a shadow instance in directory ``shadow`` (from the
 
    * ``config.py``: symlink to readable python file containing configuration code
    * ``route.py``: generated python file for cgi-bin script to symlink to
-   * ``cats``: fixed copy of cats directory from config, only updated in Phase 2
+   * ``cats``: fixed copy of cats directory from config at the real data release (the config release may be ahead)
 
 #. in shadow instance:
 
-   * ``cats``: symlink to cats directory from config
+   * ``cats``: symlink to cats directory from config; the shadow data should always be at config release
 
 Which of the real or shadow instance is served depends on a cookie ``xpose-variant``.
 
 The config file must define the following variables:
 
-* *cats* (:class:`str`): a file path to a folder containing all the meta information (cats) of the xpose instance
+* *cats* (:class:`str`): a file path to a directory containing all the meta information (categories) of the xpose instance
 * *routes* (:class:`dict[str,XposeBase]`): a simple mapping between routes (from PATH_INFO) and corresponding resource (defaults exist for ``main``, ``attach``, and ``manage``)
-* *release* (:class:`int`): the current release of the data
-* *upgrade_{n}* (:class:`Callable[[list[Entry]],None]`): invoked to upgrade the list of entries for each release *n* strictly below the current one
+* *release* (:class:`int`): the latest data release
+* *upgrade_{n}* (:class:`Callable[[list[Entry]],None]`): invoked to upgrade the list of entries for each release *n* strictly below the latest one
 
 Available types and functions
 -----------------------------

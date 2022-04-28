@@ -124,7 +124,7 @@ export default class entryView {
     }
   }
 
-  setShort () { this.el_short.innerText = this.entry.short; this.el_short.title = `:${this.entry.oid}` }
+  setShort () { this.el_short.innerText = this.entry.short; this.el_short.title = this.entry.oid?`:${this.entry.oid}[${this.entry.version}]`:'' }
   setLocked () { this.el_locked.firstElementChild.className = this.entry.access?'ui-icon ui-icon-locked':'ui-icon ui-icon-unlocked' }
 
   show_dirty (flag) { this.el_save.style.backgroundColor = flag?'red':'' }
