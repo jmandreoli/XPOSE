@@ -1,12 +1,12 @@
 # Creation date:        2022-01-15
 # Contributors:         Jean-Marc Andreoli
 # Language:             python
-# Purpose:              Xpose: instance management operations
+# Purpose:              Xpose: instance management
 #
 
 r"""
-:mod:`XPOSE.server` --- instance management operations
-======================================================
+:mod:`XPOSE.server` --- instance management
+===========================================
 """
 
 import sys,sqlite3,shutil,json
@@ -86,7 +86,9 @@ An instance of this class is a CGI resource managing a whole Xpose instance.
 #----------------------------------------------------------------------------------------------------------------------
   def dump(self,meta:Optional[dict[str,Optional[str]]]=None,**queries)->dict[str,Any]:
     r"""
-Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query pairs). Returns a dictionary with the same keys and values set to the results of the queries. The dictionary *meta* holds a description of the batch and its execution, and is added to the result with key ``meta``. Table (view) ``EntryFull`` can be used in queries instead of ``Entry`` to produce listings suitable for method :meth:`load` (field ``attach`` is converted appropriately). When *queries* is empty, it is replaced by::
+Executes a batch of SQL queries (SELECT only) specified by *queries* (key-value pairs are label-query pairs). Returns a dictionary with the same keys and values set to the results of the queries. The dictionary *meta* holds a description of the batch. It is augmented with details about the execution, and added to the result under key ``meta``.
+
+Table (view) ``EntryFull`` can be used in queries instead of ``Entry`` to produce listings suitable for method :meth:`load` (field ``attach`` is converted appropriately). In particular, when *queries* is empty, it is replaced by::
 
    {'listing':'SELECT * FROM EntryFull'}
     """
@@ -106,7 +108,7 @@ Executes a batch of SQL queries (SELECT only) specified by *queries* (key-query 
 #----------------------------------------------------------------------------------------------------------------------
   def load(self,listing:list):
     r"""
-Loads some entries in the index database. Entries are validated, and behaviour is transactional. The ``attach`` field in each *listing* entry must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment folder and the value is an absolute path to be hard-linked to that local path. Note that subfolders (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
+Loads some entries in the index database. Entries are validated, and behaviour is transactional. The ``attach`` field in each *listing* entry must be either :const:`None` or a dictionary where each key is a relative path within the entry attachment directory and the value is an absolute path to be hard-linked to that local path. Note that sub-directories (which cannot be hard-linked) never need to be explicitly created as attachments, as they are created as need be to store file attachments.
 
 :param listing: the list of entries to load into the index database
     """
@@ -141,12 +143,27 @@ Loads some entries in the index database. Entries are validated, and behaviour i
 #----------------------------------------------------------------------------------------------------------------------
   def precompute_trigger(self,table:str,cat:str,defn:str,when:Optional[str]=None):
     r"""
-Declares a trigger on ``INSERT`` or ``UPDATE`` operations on the ``Entry`` table, when the ``cat`` field is *cat*. The triggered action must be an insertion into *table*.
+Declares a trigger after ``INSERT`` and ``UPDATE`` operations on the ``Entry`` table, when the ``cat`` field is *cat*. The triggered action must be an insertion into *table*. Suppose for example that a category ``meeting`` specifies, in its json schema, an attribute ``title`` and ``setting``, itself with attributes ``date`` and ``time``. We could have:
+
+.. code-block:: python
+
+   title = 'json_extract(NEW.value,"$.title")'
+   date = 'json_extract(NEW.value,"$.setting.date")'
+   time = 'json_extract(NEW.value,"$.setting.time")'
+   defn = f'VALUES NEW.oid,format("%s [%s at %s]",{title},{date},{time})'
+   precompute_trigger('Short','meeting',defn)
+
+The resulting trigger for ``INSERT`` is:
+
+.. code-block:: sql
+
+   CREATE TRIGGER ShortTriggerInsertMeeting AFTER INSERT ON Entry WHEN NEW.cat="meeting"
+   BEGIN INSERT INTO Short VALUES NEW.oid,format("%s [%s at %s]",json_extract(NEW.value,"$.title"),json_extract(NEW.value,"$.setting.date"),json_extract(NEW.value,"$.setting.time")); END
 
 :param table: the target table populated by the trigger
 :param cat: the category (field ``cat``) for which the trigger executes
 :param when: (optional) additional condition for the trigger to execute
-:param defn: what to insert in the target table, as an SQL ``SELECT`` statement or ``VALUES`` clause
+:param defn: what to insert into the target table, as an SQL ``SELECT`` statement or ``VALUES`` clause
     """
 #----------------------------------------------------------------------------------------------------------------------
     def create_trigger(op):
@@ -166,7 +183,9 @@ END'''
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input: url-encoded form where each field specifies a label and associated sql query pair, passed to method :meth:`dump`.
+Input: url-encoded form where each field specifies a label-query pair, passed to method :meth:`dump`.
+
+Output (text/json): output of method :meth:`dump`.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
@@ -179,13 +198,8 @@ Input: url-encoded form where each field specifies a label and associated sql qu
     r"""
 No input expected. Two phases:
 
-* Phase 1: real->shadow
-
-  * when the root contains a ``config.py`` file: *self* is the real instance, *target* is ``./shadow``
-
-* Phase 2: shadow->real
-
-  * when the root does not contain a ``config.py`` file: *self* is the shadow instance (must be named ``shadow``), *target* is ``..``
+* Phase 1: when the root contains a ``config.py`` file, transfer [real->shadow] *self* is the real instance, *target* is ``./shadow`` from root.
+* Phase 2: when the root does not contain a ``config.py`` file, transfer [shadow->real] *self* is the shadow instance (must be named ``shadow``), *target* is ``..`` from root.
     """
 #----------------------------------------------------------------------------------------------------------------------
     config = self.root/'config.py'

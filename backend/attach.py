@@ -1,12 +1,12 @@
 # Creation date:        2022-01-15
 # Contributors:         Jean-Marc Andreoli
 # Language:             python
-# Purpose:              Xpose: attachment folder operations
+# Purpose:              Xpose: attachment operations
 #
 
 r"""
-:mod:`XPOSE.attach` --- attachment folder operations
-====================================================
+:mod:`XPOSE.attach` --- attachment operations
+=============================================
 """
 
 import shutil
@@ -51,7 +51,7 @@ An instance of this class manages an xpose instance's attachments (field ``attac
 #----------------------------------------------------------------------------------------------------------------------
   def perform(self,path:Path,src,trg,is_new:bool):
     r"""
-Executes an operations on *path*. Essentially renames *src* to *trg* (or removes the former if the latter is empty).
+Executes an operation on *path*. Essentially renames *src* to *trg* (or removes the former if the latter is empty).
 
 :param src: source path of the op
 :param trg: target path of the op (possibly empty)

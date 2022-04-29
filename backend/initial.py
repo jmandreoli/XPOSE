@@ -14,9 +14,11 @@ To initialise an Xpose instance, run the command::
 
 where
 
-* the ``PYTHONPATH`` enviroment variable must give access to the XPOSE package (its default name, used here, is 'xpose', but it may be specified using the ``-x`` option)
+* the ``PYTHONPATH`` enviroment variable must give access to the XPOSE package
 * the resulting cgi-script will use the same python executable as specified in the command
 * the meaning of the arguments can be obtained by passing option ``-h`` or ``--help``
+
+The command above assumes the name of the XPOSE package is xpose (default). It may be changed, in which case it must be changed in the ``-m`` option above, and must also be explicitly provided with option ``-x``.
 """
 
 
@@ -25,7 +27,7 @@ from pathlib import Path
 from importlib import import_module
 
 #======================================================================================================================
-def initial(_path:str,_cgi_script:str,_cgi_url:str,_config:str,_load:str=None,_pname:str='xpose'):
+def run(_path:str,_cgi_script:str,_cgi_url:str,_config:str='./config.py',_load:str=None,_pname:str='xpose'):
   r"""
 Xpose instance initialisation.
 
@@ -78,6 +80,6 @@ if __name__=='__main__':
   parser.add_argument('cgi_script',metavar='CGI-SCRIPT',help='Path to the cgi-script to invoke the Xpose instance (OVERRIDDEN)')
   parser.add_argument('cgi_url',metavar='CGI-URL',help='URL to invoke CGI-SCRIPT')
   a = parser.parse_args(sys.argv[1:])
-  R = initial(_path=a.path,_cgi_script=a.cgi_script,_cgi_url=a.cgi_url,_config=a.config,_load=a.load,_pname=a.pname)
+  R = run(_path=a.path,_cgi_script=a.cgi_script,_cgi_url=a.cgi_url,_config=a.config,_load=a.load,_pname=a.pname)
   print(f'''Initialisation successful. You should now create a file xpose.html in the server 
 ''')

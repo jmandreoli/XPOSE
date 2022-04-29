@@ -178,10 +178,12 @@ An instance of this class creates a context allowing transactional operations on
 @contextmanager
 def http_request(method:str,url:str,**ka):
   r"""
-A thin layer around :meth:`http.client.HTTPConnection.request`. Supports *url* in ``http``, ``https`` schemes as well as direct file path names. Works as a python context yielding a response object similar to :class:`http.client.HTTPResponse`. With http(s) scheme, the host specification can contain ``@`` to provide basic authentication (eventually removed from the URL) in the form of a login-password pair separated by ``:``  (if the password is omitted, it is read from the terminal), e.g. ``https://joe@example.com/some/path?some=query``.
+A thin layer around :meth:`http.client.HTTPConnection.request`. Supports *url* in ``http``, ``https`` schemes and works as a python context yielding a :class:`http.client.HTTPResponse` object. The host specification in *url* can contain ``@`` to provide basic authentication (eventually removed from *url*) in the form of a login-password pair separated by ``:``  (if the password is omitted, it is read from the terminal), e.g. ``https://joe@example.com/some/path?some=query``.
+
+With method GET, *url* can be a simple path to an existing file (*ka* must then be empty). The returned object supports only attributes :attr:`status`, :attr:`reason`, as well as method :meth:`read`, as in :class:`http.client.HTTPResponse` class.
 
 :param method: HTTP method name (case ignored)
-:param url: url to open (possibly containing ``@`` for authentication)
+:param url: url to open
 :param ka: same as in method :meth:`http.client.HTTPConnection.request`
   """
 #======================================================================================================================

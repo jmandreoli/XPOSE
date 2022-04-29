@@ -98,8 +98,8 @@ export default class attachView {
     if (!ops.length) return noopAlert()
     const resp = await axios({url:`${this.url}/attach`,method:'PATCH',data:{ops:ops,path:this.path,version:this.version}}).
       catch(err=>{throw new AjaxError(err)})
-    if (resp.data.errors.length) { throw new Error(resp.data.errors.join('\n')) }
-    else { this.display1(this.path,resp.data) }
+    this.display1(this.path,resp.data)
+    if (resp.data.errors.length) { throw new Error(`The following error(s) occurred:\n${resp.data.errors.join('\n')}`) }
   }
 
   async refresh () { await this.display_clean(this.path) }

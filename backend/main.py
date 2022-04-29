@@ -1,12 +1,12 @@
 # Creation date:        2022-01-15
 # Contributors:         Jean-Marc Andreoli
 # Language:             python
-# Purpose:              Xpose: index database operations
+# Purpose:              Xpose: dashboard CGI resources
 #
 
 r"""
-:mod:`XPOSE.main` --- index database operations
-===============================================
+:mod:`XPOSE.main` --- dashboard CGI resources
+=============================================
 """
 
 import sqlite3,json
@@ -45,7 +45,9 @@ Same as base, but adds sqlite functions ``create_attach``, ``delete_attach`` and
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input: url-encoded form with one field ``sql`` whose value is a sql query (SELECT only), plus fields to fill the named parameters in that query.
+Input: url-encoded form with one field ``sql`` whose value is a sql query (SELECT only); the other fields provide the named parameters in that query.
+
+Output (text/json): list of entries resulting from the execution of the query; each row is a dictionary where the fields are column names from the query.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
@@ -60,6 +62,8 @@ Input: url-encoded form with one field ``sql`` whose value is a sql query (SELEC
   def do_put(self):
     r"""
 Input: JSON encoded dict, either inserted as a new entry in Xpose or used to update an existing one (depending on the presence of attribute ``oid``). No validation is performed.
+
+Output (text/json): JSON encoded dict with keys ``oid``, ``version``, ``short``, ``attach`` characterising the new or updated entry.
     """
 #----------------------------------------------------------------------------------------------------------------------
     entry = self.parse_input()
@@ -81,6 +85,8 @@ Input: JSON encoded dict, either inserted as a new entry in Xpose or used to upd
   def do_delete(self):
     r"""
 Input: JSON encoded dict with a single key ``oid``, which must denote the primary key of an Entry to be deleted.
+
+Output (text/json): JSON encoded dict with key ``oid`` of the deleted entry.
     """
 #----------------------------------------------------------------------------------------------------------------------
     oid = self.parse_input()['oid']
@@ -105,7 +111,9 @@ An instance of this class is a CGI resource managing the Xpose attachment folder
 #----------------------------------------------------------------------------------------------------------------------
   def do_get(self):
     r"""
-Input: url-encoded form with a single field ``path``.
+Input: url-encoded form with a single field ``path`` (which must point to a directory).
+
+Output (text/json): JSON encoded dict with keys ``content``, ``version`` and ``toplevel`` characterising the queried path.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
@@ -118,6 +126,8 @@ Input: url-encoded form with a single field ``path``.
   def do_patch(self):
     r"""
 Input: JSON encoded dict with keys ``path``, ``version`` and ``ops``, the latter being a list of operations. An operation is specified as a dict with keys ``src``, ``trg`` (relative paths) and ``is_new`` (boolean).
+
+Output (text/json): Same as method :meth:`do_get`, characterising the queried path after the list of operations has been executed. If errors have occurred, they are stored under key ``error``.
     """
 #----------------------------------------------------------------------------------------------------------------------
     content = self.parse_input()
@@ -135,6 +145,8 @@ Input: JSON encoded dict with keys ``path``, ``version`` and ``ops``, the latter
   def do_post(self):
     r"""
 Input: octet stream of uploaded file chunk + optionally, url-encoded form with single field ``target``.
+
+Output (text/json): JSON encoded dict with keys ``name``, ``mtime`` and ``size``.
     """
 #----------------------------------------------------------------------------------------------------------------------
     form = self.parse_qsl()
