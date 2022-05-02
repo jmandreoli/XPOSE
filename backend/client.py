@@ -13,8 +13,8 @@ import sqlite3,json
 from functools import cached_property
 from pathlib import Path
 from typing import Optional, Union, Callable, Dict, Any
-from .utils import CGIMixin, rebase, http_ts
 from . import XposeBase, WithCatsMixin
+from .utils import CGIMixin, rebase, http_ts
 
 #======================================================================================================================
 class XposeClient (XposeBase,WithCatsMixin,CGIMixin):

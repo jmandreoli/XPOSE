@@ -23,7 +23,7 @@ class Xpose {
     this.variant = (document.cookie.split('; ').find(row=>row.startsWith('xpose-variant='))||'').substr(14)
     const views = config.views||{}
     this.views = {}
-    const default_views = { console:consoleView, listing:listingView, entry:entryView, attach:attachView, manage:manageView }
+    const default_views = { listing:listingView, entry:entryView, attach:attachView, manage:manageView }
     for (const [name,default_factory] of Object.entries(default_views)) { this.addView(name,new (views[name]||default_factory)()) }
     window.addEventListener('beforeunload',(e)=>{ if (this.dirty) {e.preventDefault();e.returnValue=''} })
   }
@@ -67,7 +67,8 @@ class Xpose {
     }
   }
   async onerror (label,err) {
-    this.views.console.display(this.current,`ERROR[${label}]: ${err.name}\n${err.message}\n${err.stack}`)
+    this.console.lastElementChild.innerText = `ERROR[${label}]: ${err.name}\n${err.message}\n${err.stack}`
+    this.console.style.display = ''
     throw err // so it still appears in the js console
   }
   toggle_variant () { document.cookie=`xpose-variant=${this.variant?'':'shadow'}`;window.location.reload() }
@@ -81,6 +82,12 @@ class Xpose {
       this.el_view = addElement(h1,'span')
     }
     {
+      this.console = addElement(document.body,'div',{class:'caution',style:'position:absolute; left:0; right:0; z-index:100; display:none'})
+      const button = addJButton(this.console,'close',{class:'caution',style:'float:right'})
+      button.addEventListener('click',()=>{this.console.style.display='none'})
+      addElement(this.console,'div',{class:'console'})
+    }
+    {
       if (this.variant) {
         const warning = addElement(document.body,'div',{class:'xpose-variant-warning'})
         addText(warning,this.variant)
@@ -92,29 +99,4 @@ class Xpose {
   }
 }
 
-
-//
-// consoleView
-//
-
-class consoleView {
-  constructor () {
-    this.toplevel = document.createElement('div')
-    this.el_main = addElement(this.toplevel,'textarea',{class:'console caution'})
-    {
-      const button = addJButton(this.toplevel,'arrowreturnthick-1-w',{class:'caution'})
-      button.addEventListener('click',()=>this.close())
-    }
-    this.origin = null
-  }
-  display (origin,msg) {
-    this.origin = origin
-    this.el_main.value = msg
-    this.show()
-  }
-  close () {
-    this.origin.show()
-  }
-}
-
-export { Xpose, consoleView, listingView, entryView, attachView, manageView }
+export { Xpose, listingView, entryView, attachView, manageView }

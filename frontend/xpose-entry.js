@@ -43,7 +43,7 @@ export default class entryView {
     { // access editor form
       const div = addElement(this.toplevel,'div')
       this.accessEditor = new JSONEditor(div,this.accessEditorConfig())
-      this.accessEditor.on('change',()=>{if(this.active)this.set_dirty(true)})
+      this.accessEditor.on('change',()=>{ this.setLocked(); if(this.active)this.set_dirty(true)} )
     }
     { // main entry editor form
       this.el_main = addElement(this.toplevel,'div')
@@ -70,7 +70,7 @@ export default class entryView {
     this.active = false
     this.accessEditor.setValue(entry.access)
     this.editor = new JSONEditor(this.el_main,this.editorConfig())
-    this.editor.on('ready',()=>{ this.setShort(); this.setLocked(); this.show() })
+    this.editor.on('ready',()=>{ this.setShort(); this.show() })
     this.editor.on('change',()=>{ if (this.active) {this.set_dirty(true)} else {this.active=true} })
   }
 
@@ -125,7 +125,7 @@ export default class entryView {
   }
 
   setShort () { this.el_short.innerText = this.entry.short; this.el_short.title = this.entry.oid?`:${this.entry.oid}[${this.entry.version}]`:'' }
-  setLocked () { this.el_locked.firstElementChild.className = this.entry.access?'ui-icon ui-icon-locked':'ui-icon ui-icon-unlocked' }
+  setLocked () { this.el_locked.firstElementChild.className = this.accessEditor.getValue()?'ui-icon ui-icon-locked':'ui-icon ui-icon-unlocked' }
 
   show_dirty (flag) { this.el_save.style.backgroundColor = flag?'red':'' }
 

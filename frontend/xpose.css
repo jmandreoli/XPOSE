@@ -9,5 +9,4 @@ h1 { background-color: black; color: white; }
 .manage-stats td:first-child { font-weight: bold; }
 .xpose-progress { border:0; padding:0; }
 .xpose-progress div { border: thin solid red; }
-.console { background-color: linen; width: 100%; height: 30em; }
-.console + button { position: absolute; top: 0; right:0;  }
+.console { padding:2mm; white-space: pre; background-color: WhiteSmoke; }
