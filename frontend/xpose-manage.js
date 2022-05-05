@@ -53,7 +53,7 @@ export default class manageView {
   }
 
   async display () {
-    const resp = await axios({url:encodeURIqs(`${this.url}/manage`,this.stats),headers:{'Cache-Control':'no-store'}}).
+    const resp = await axios.get(encodeURIqs(`${this.url}/manage`,this.stats),{headers:{'Cache-Control':'no-store'}}).
       catch(err=>{throw new AjaxError(err)})
     if (this.variant) { this.el_shadow.title = 'Transfer shadow->instance'; this.el_shadow.className = 'caution' } // done once never changed
     const meta = resp.data.meta
@@ -71,7 +71,7 @@ export default class manageView {
 
   async shadow () {
     if (this.variant && !window.confirm('You are about to override the entire Xpose instance.')) { return }
-    await axios({url:`${this.url}/manage`,method:'POST'}).catch(err=>{throw new AjaxError(err)})
+    await axios.post(`${this.url}/manage`).catch(err=>{throw new AjaxError(err)})
     this.toggle_variant()
   }
 

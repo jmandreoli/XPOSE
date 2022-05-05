@@ -48,7 +48,7 @@ export default class listingView {
 
   async display () {
     this.editor.disable()
-    const resp = await axios({url:encodeURIqs(`${this.url}/main`,{sql:`${this.editor.schema.title} ${this.editor.getValue()}`}),headers:{'Cache-Control':'no-store'}}).
+    const resp = await axios.get(encodeURIqs(`${this.url}/main`,{sql:`${this.editor.schema.title} ${this.editor.getValue()}`}),{headers:{'Cache-Control':'no-store'}}).
       finally(()=>this.editor.enable()).
       catch(err=>{throw new AjaxError(err)})
     this.set_dirty(false)

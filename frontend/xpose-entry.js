@@ -58,7 +58,7 @@ export default class entryView {
   }
   async display_old (oid) {
     const sql = 'SELECT oid,version,cat,short,value as "value [JSON]",attach,access FROM EntryShort WHERE oid=:oid'
-    const resp = await axios({url:encodeURIqs(`${this.url}/main`,{sql:sql,oid:oid}),headers:{'Cache-Control':'no-store'}}).
+    const resp = await axios.get(encodeURIqs(`${this.url}/main`,{sql:sql,oid:oid}),{headers:{'Cache-Control':'no-store'}}).
       catch(err=>{throw new AjaxError(err)})
     this.display(resp.data[0])
   }
@@ -81,7 +81,7 @@ export default class entryView {
     this.entry.value = this.editor.getValue()
     this.entry.access = this.accessEditor.getValue()||null
     this.editor.disable()
-    const resp = await axios({url:`${this.url}/main`,method:'PUT',data:this.entry}).
+    const resp = await axios.put(`${this.url}/main`,this.entry).
       finally(()=>this.editor.enable()).
       catch(err=>{throw new AjaxError(err)})
     this.set_dirty(false)
@@ -93,8 +93,7 @@ export default class entryView {
   async remove () {
     if (!deleteConfirm()) return
     this.editor.disable()
-    await axios({url:`${this.url}/main`,method:'DELETE',data:{oid:this.entry.oid}}).
-      catch(err=>{throw new AjaxError(err)})
+    await axios.delete(`${this.url}/main`,{data:{oid:this.entry.oid}}).catch(err=>{throw new AjaxError(err)})
     await this.close(true)
   }
 

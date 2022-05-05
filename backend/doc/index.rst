@@ -21,8 +21,8 @@ The index database has a table ``Entry`` which stores all the raw meta-informati
 
 * ``oid``: entry key as an :class:`int` (primary key, auto-incremented)
 * ``version``: version of this entry as an :class:`int` (always incremented on update)
-* ``cat``: category as a relative path in the ``cats`` directory (see below)
-* ``value``: JSON encoded data, conforming to the JSON schema of the category held by ``cat``
+* ``cat``: category of this entry as a relative path in the ``cats`` directory (see below)
+* ``value``: JSON encoded data for this entry, conforming to the JSON schema of the category specified by ``cat``
 * ``attach``: relative path in the ``attach`` directory holding the attachments of this entry
 * ``created``: creation timestamp of this entry in ISO format YYYY-MM-DD[T]HH:MM:SS.ffffff
 * ``modified``: last modification timestamp of this entry in same format as ``created``
@@ -31,14 +31,14 @@ The index database has a table ``Entry`` which stores all the raw meta-informati
 
 Note that field ``created`` is unique for each entry and can be used as permanent identifier (unlike ``oid`` which may change when the Xpose instance is re-initialised).
 
-All the other tables, triggers, views, indexes etc. contain information derived from table ``Entity`` and are created and populated by the categories. One such dependent table, needed by hte dashboard, is table ``Short`` with the following columns:
+All the other tables, triggers, views, indexes etc. contain information derived from table ``Entry`` and are created and populated by the categories. One such dependent table, needed by hte Xpose dashboard, is table ``Short`` with the following columns:
 
 * ``entry``: reference to an ``Entry`` row (primary key, foreign reference)
 * ``value``: short name for the entry (plain text)
 
-Creation and Update triggers on table ``Entry`` must be defined in each category to populate table ``Short``, so that each entity has exactly one corresponding row in table ``Short``.
+Creation and Update triggers on table ``Entry`` must be defined in each category to populate table ``Short``, so that each entry has exactly one corresponding row in table ``Short``.
 
-The following sqlite functions are made available in the index database in contexts where they are needed:
+The following sqlite functions are made available in connections to the index database in contexts where they are needed:
 
 * ``create_attach`` *oid* -> *attach*: maps the *oid* field to the *attach* fields of an entry
 * ``delete_attach`` *oid* ->: called when an entry with a given *oid* field is deleted
@@ -49,7 +49,7 @@ The following sqlite functions are made available in the index database in conte
 Categories
 ----------
 
-A category name is a sequence of identifiers separated by ``/``, thus matching the structure of (posix) path names. For each category ``{cat}``, there must be a file ``cats/{cat}/schema.json`` holding a `json schema <https://json-schema.org/>`_ describing the entries of that category, and used for editing. There may also be other utility files in directory ``cats/{cat}``, e.g. `genshi templates <https://genshi.edgewall.org/>`_ producing various presentations of the entries of that category.
+A category name is a sequence of identifiers separated by ``\/``, thus matching the structure of (posix) path names. For each category ``{cat}``, there must be a file ``cats/{cat}/schema.json`` holding a `json schema <https://json-schema.org/>`_ describing the entries of that category, and used for editing. There may also be other utility files in directory ``cats/{cat}``, e.g. `genshi templates <https://genshi.edgewall.org/>`_ producing various presentations of the entries of that category.
 
 Furthermore, all files named ``init.py`` at any level under directory ``cat`` are executed in depth first order at the initialisation or re-initialisation of an Xpose instance. Such files may add new tables, views, triggers, indexes etc. to the index database. These in turn may populate the index database with redundant information derived from the ``Entry`` table, e.g. populating table ``Short``, required by many applications. The main principle is that all the information of an Xpose instance is entirely contained in the ``Entry`` table as well as the attachment directory, so that a whole Xpose instance can be copied, moved around or upgraded by just preserving these two components. A helper method :meth:`.server.XposeServer.precompute_trigger` is available to facilitate the definition of triggers.
 
@@ -72,7 +72,7 @@ The (data) release of an Xpose instance refers to a version of its category sche
 
    * ``index.db``: index database file
    * ``attach`` and ``attach/.uploaded``: attachment directory and sub-directory for file uploads
-   * ``.routes``: routing directory containing release specific configured manipulation scripts
+   * ``.routes``: routing directory containing the available (pickled) cgi resources
 
 #. in real instance:
 

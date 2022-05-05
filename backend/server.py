@@ -153,11 +153,13 @@ Declares a trigger after ``INSERT`` and ``UPDATE`` operations on the ``Entry`` t
    defn = f'VALUES NEW.oid,format("%s [%s at %s]",{title},{date},{time})'
    precompute_trigger('Short','meeting',defn)
 
-The resulting trigger for ``INSERT`` is:
+The resulting triggers are:
 
 .. code-block:: sql
 
    CREATE TRIGGER ShortTriggerInsertMeeting AFTER INSERT ON Entry WHEN NEW.cat="meeting"
+   BEGIN INSERT INTO Short VALUES NEW.oid,format("%s [%s at %s]",json_extract(NEW.value,"$.title"),json_extract(NEW.value,"$.setting.date"),json_extract(NEW.value,"$.setting.time")); END;
+   CREATE TRIGGER ShortTriggerUpdateMeeting AFTER UPDATE ON Entry WHEN NEW.cat="meeting"
    BEGIN INSERT INTO Short VALUES NEW.oid,format("%s [%s at %s]",json_extract(NEW.value,"$.title"),json_extract(NEW.value,"$.setting.date"),json_extract(NEW.value,"$.setting.time")); END
 
 :param table: the target table populated by the trigger

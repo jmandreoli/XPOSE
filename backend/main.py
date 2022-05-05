@@ -144,14 +144,13 @@ Output (text/json): Same as method :meth:`do_get`, characterising the queried pa
 #----------------------------------------------------------------------------------------------------------------------
   def do_post(self):
     r"""
-Input: octet stream of uploaded file chunk + optionally, url-encoded form with single field ``target``.
+Input: octet stream of uploaded file chunks.
 
 Output (text/json): JSON encoded dict with keys ``name``, ``mtime`` and ``size``.
     """
 #----------------------------------------------------------------------------------------------------------------------
-    form = self.parse_qsl()
     it = self.parse_input('application/octet-stream',chunk=self.chunk)
-    res = self.attach.upload(it,form.get('target'))
+    res = self.attach.upload(it)
     content = dict(zip(('name','mtime','size'),res))
     return json.dumps(content), {'Content-Type':'text/json'}
 

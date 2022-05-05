@@ -84,13 +84,11 @@ Executes an operation on *path*. Essentially renames *src* to *trg* (or removes 
     shutil.rmtree(self.root/path)
 
 #----------------------------------------------------------------------------------------------------------------------
-  def upload(self,it,target)->Optional[tuple[str,str,int]]:
-    r"""Uploads a stream of bytes *it* to the *target* path in ``.uploaded`` directory. Returns a triple of the name of the uploaded file (which is different from *target* only if *target* is initially empty), its last modification time, and its current size (in bytes)"""
+  def upload(self,it)->tuple[str,str,int]:
+    r"""Uploads a stream of byte strings *it* to directory ``.uploaded``. Returns a triple of the name of the uploaded file, its last modification time, and its current size (in bytes)"""
 #----------------------------------------------------------------------------------------------------------------------
     from tempfile import NamedTemporaryFile
-    upload_dir = self.root/'.uploaded'
-    if it is None: (upload_dir/target).unlink(); return None
-    with ((upload_dir/target).open('ab') if target else NamedTemporaryFile('wb',dir=upload_dir,prefix='',delete=False)) as v:
+    with NamedTemporaryFile('wb',dir=self.root/'.uploaded',prefix='',delete=False) as v:
       f = Path(v.name)
       try:
         for x in it: v.write(x)

@@ -4,7 +4,7 @@
  * Purpose:              Xpose: client side attach view
  */
 
-import { upload, human_size, encodeURIqs, addElement, addJButton, addText, noopAlert, AjaxError } from './utils.js'
+import { human_size, encodeURIqs, addElement, addJButton, addText, noopAlert, AjaxError } from './utils.js'
 
 export default class attachView {
 
@@ -40,7 +40,6 @@ export default class attachView {
     { // listing table
       this.el_main = addElement(this.toplevel,'tbody',{class:'attach'})
     }
-    this.chunk = 1
     this.entry = null
     this.path = null
     this.version = null
@@ -56,7 +55,7 @@ export default class attachView {
   async display_clean(path) { if (!this.confirm_dirty()) await this.display(path) }
 
   async display(path) {
-    const resp = await axios({url:encodeURIqs(`${this.url}/attach`,{path:path}),headers:{'Cache-Control':'no-store'}}).
+    const resp = await axios.get(encodeURIqs(`${this.url}/attach`,{path:path}),{headers:{'Cache-Control':'no-store'}}).
       catch(err=>{throw new AjaxError(err)})
     this.display1(path,resp.data)
   }
@@ -74,14 +73,18 @@ export default class attachView {
   async upload (files) {
     const outcomes = await Promise.allSettled(Array.from(files).map(file=>{
       const progressor = this.progressor(file.name)
-      return upload({file:file,url:`${this.url}/attach`,chunk:this.chunk,progress:progressor.update}).
-        finally(()=>progressor.close())
+      const controller = new AbortController()
+      return axios.post(`${this.url}/attach`,file,{
+        headers:{'Content-Type':'application/octet-stream','Transfer-Encoding':'chunked'},
+        signal:controller.signal,
+        onUploadProgress:(evt)=>{if(progressor.update(evt.loaded/file.size)){controller.abort()}}
+      }).finally(()=>progressor.close())
     }))
     const errors = []
-    outcomes.forEach((outcome,i)=>{
+    outcomes.forEach((outcome,i) => {
       const file = files[i]
       if (outcome.status=='fulfilled') {
-        const result = outcome.value
+        const result = outcome.value.data
         this.addRow(result.name,result.mtime,file.size,file.name)
       }
       else { errors.push({name:file.name,reason:outcome.reason}) }
@@ -96,7 +99,7 @@ export default class attachView {
       if (is_new || iname!=name) { ops.push({src:name,trg:iname,is_new:is_new}) }
     }
     if (!ops.length) return noopAlert()
-    const resp = await axios({url:`${this.url}/attach`,method:'PATCH',data:{ops:ops,path:this.path,version:this.version}}).
+    const resp = await axios.patch(`${this.url}/attach`,{ops:ops,path:this.path,version:this.version}).
       catch(err=>{throw new AjaxError(err)})
     this.display1(this.path,resp.data)
     if (resp.data.errors.length) { throw new Error(`The following error(s) occurred:\n${resp.data.errors.join('\n')}`) }
