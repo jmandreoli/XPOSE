@@ -5,8 +5,8 @@
 #
 
 r"""
-:mod:`XPOSE.utils` --- miscellaneous utilities
-==============================================
+Available types and functions
+-----------------------------
 """
 
 import sys,os,json,re
@@ -16,7 +16,7 @@ from functools import singledispatch
 from datetime import datetime
 from http import HTTPStatus
 from urllib.parse import parse_qsl,urljoin
-from typing import Union, Callable, Dict, Any
+from typing import Callable, Any
 
 #======================================================================================================================
 class CGIMixin:
@@ -27,6 +27,9 @@ A simple helper mixin that simplifies writing CGI resource classes. A resource c
 
 #----------------------------------------------------------------------------------------------------------------------
   def process_cgi(self):
+    r"""
+Selects and executes the ``do_*`` method of this resource. Catches all exceptions and return them as plain text with the appropriate HTTP status code (500 by default) and traceback as body.
+    """
 #----------------------------------------------------------------------------------------------------------------------
     method = os.environ['REQUEST_METHOD']
     do = getattr(self,'do_'+method.lower(),None)
@@ -47,8 +50,20 @@ A simple helper mixin that simplifies writing CGI resource classes. A resource c
   def from_server_root(path:Path)->Path:
     return Path('/'+str(path.relative_to(os.environ['DOCUMENT_ROOT'])))
 
+#----------------------------------------------------------------------------------------------------------------------
   @staticmethod
   def parse_input(mime:str='application/json',chunk:int=None):
+    r"""
+Parses input stream according to *mime*:
+
+* ``application/json``: applies json parser
+* ``application/x-www-form-urlencoded``: returns a dictionary (unsophisticated: no multiple values per key)
+* ``application/octet-stream``: returns an iterator of byte strings
+
+:param mime: the mimetype to interpret the input
+:param chunk: never reads more than this amount of bytes (if not :const:`None`)
+    """
+#----------------------------------------------------------------------------------------------------------------------
     def read(n):
       while n>0:
         t = sys.stdin.buffer.read(n)
@@ -66,7 +81,7 @@ A simple helper mixin that simplifies writing CGI resource classes. A resource c
     n = int(os.environ['CONTENT_LENGTH'])
     Transf = {
       'application/json': (lambda it: json.loads(merge(it))),
-      'application/x-www-form-urlencoded': (lambda it: dict(parse_qsl(merge(it)))), # unsophisticated: no multiple values per key
+      'application/x-www-form-urlencoded': (lambda it: dict(parse_qsl(merge(it)))),
       'application/octet-stream': (lambda it: it),
     }
     return Transf[mime]((read if chunk is None else chunk_read)(n) if n>0 else None)
@@ -144,7 +159,7 @@ An instance of this class creates a context allowing transactional operations on
      raise Exception() # file1 and dir2 are restored, possibly erasing the new content in p1,p2
   """
 #======================================================================================================================
-  def __init__(self,p:Union[str,Path],name:str='.backup'):
+  def __init__(self,p:str|Path,name:str='.backup'):
     self.root = Path(p).resolve()
     assert self.root.is_dir() and len(Path(name).parts) == 1, (p,name)
     self.backup = self.root/name

@@ -5,8 +5,8 @@
 #
 
 r"""
-:mod:`XPOSE` (toplevel) --- base definitions
-============================================
+Available types and functions
+-----------------------------
 """
 
 import sqlite3,json
@@ -32,7 +32,7 @@ An instances of this base class is a resource for processing Xpose operations. A
   index_db: Path
   r"""Path to the index database"""
 
-  def setup(self,path:Union[str,Path]='.'):
+  def setup(self,path:str|Path='.'):
     self.root = Path(path).resolve()
     self.index_db = self.root/'index.db'
     return self
@@ -99,7 +99,7 @@ Checks that *value*, viewed as a json object, conforms to the json schema associ
   def load_template(self,tmpl):
     return self.template_loader.load(tmpl)
 #----------------------------------------------------------------------------------------------------------------------
-  def apply_template(self,tmpl:str,err_tmpl:str,rendering:Union[str,None],**args):
+  def apply_template(self,tmpl:str,err_tmpl:str,rendering:str|None,**args):
     r"""
 Applies a template specified by *tmpl* with a set of variables specified by *args*. All templates are found in folder ``templates`` with relative path specifying the template role and category, and suffix ``.xhtml``.
 

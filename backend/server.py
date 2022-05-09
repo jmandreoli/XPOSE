@@ -5,13 +5,13 @@
 #
 
 r"""
-:mod:`XPOSE.server` --- instance management
-===========================================
+Available types and functions
+-----------------------------
 """
 
 import sys,sqlite3,shutil,json
 from pathlib import Path
-from typing import Union, Callable, Any, Optional
+from typing import Callable, Any, Optional
 from . import XposeBase, WithCatsMixin
 from .attach import WithAttachMixin
 from .utils import CGIMixin,Backup,http_raise,http_ts,set_config,get_config,default_attach_namer

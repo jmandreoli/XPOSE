@@ -5,8 +5,8 @@
 #
 
 r"""
-:mod:`XPOSE.client` --- client CGI resource
-===========================================
+Available types and functions
+-----------------------------
 """
 
 import sqlite3,json
@@ -56,4 +56,4 @@ Output (text/json): list of entries resulting from the execution of the query; e
 
   @cached_property
   def url_base(self): return self.from_server_root(self.root)
-  def rebase(self,x:str,path:Union[str,Path]): return rebase(x,str(self.url_base/'attach'/path/'_'))
+  def rebase(self,x:str,path:str|Path): return rebase(x,str(self.url_base/'attach'/path/'_'))

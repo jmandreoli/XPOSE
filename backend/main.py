@@ -5,15 +5,15 @@
 #
 
 r"""
-:mod:`XPOSE.main` --- dashboard CGI resources
-=============================================
+Available types and functions
+-----------------------------
 """
 
 import sqlite3,json
 from datetime import datetime
 from pathlib import Path
 from http import HTTPStatus
-from typing import Union, Callable, Dict, Any
+from typing import Callable, Dict, Any
 from . import XposeBase
 from .attach import WithAttachMixin
 from .utils import CGIMixin,http_raise,http_ts,default_attach_namer

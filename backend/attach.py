@@ -5,15 +5,15 @@
 #
 
 r"""
-:mod:`XPOSE.attach` --- attachment operations
-=============================================
+Available types and functions
+-----------------------------
 """
 
 import shutil
 from functools import cached_property
 from pathlib import Path
 from datetime import datetime
-from typing import Union, Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any
 
 #======================================================================================================================
 class Attach:
@@ -25,7 +25,7 @@ An instance of this class manages an xpose instance's attachments (field ``attac
   def __init__(self,root): self.root = root.resolve()
 
 #----------------------------------------------------------------------------------------------------------------------
-  def getpath(self,path:Union[str,Path])->tuple[Path,int]:
+  def getpath(self,path:str|Path)->tuple[Path,int]:
     r"""Returns the absolute path of *path*, and its depth level."""
 #----------------------------------------------------------------------------------------------------------------------
     path_ = (self.root/path).resolve()
@@ -40,7 +40,8 @@ An instance of this class manages an xpose instance's attachments (field ``attac
     def E(p:Path)->tuple[bool,str,str,int]:
       s = p.stat(); return p.is_dir(),p.name,datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds'),(s.st_size if p.is_file() else -len(list(p.iterdir())))
     if not path.is_dir(): return []
-    content = L = sorted(map(E,path.iterdir()))
+    content = sorted(map(E,path.iterdir()))
+    L:list[Any] = content
     while not L:
       path.rmdir()
       path = path.parent

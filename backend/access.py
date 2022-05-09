@@ -5,15 +5,15 @@
 #
 
 r"""
-:mod:`XPOSE.access` --- access control operations
-=================================================
+Available types and functions
+-----------------------------
 """
 
 import os,re
 from functools import cached_property
 from pathlib import Path
 from lxml.etree import fromstring as xml
-from typing import Union, Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any
 
 #======================================================================================================================
 class Credentials:
