@@ -4,11 +4,6 @@
 # Purpose:              Xpose: instance management
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import sys,sqlite3,shutil,json
 from pathlib import Path
 from typing import Callable, Any, Optional

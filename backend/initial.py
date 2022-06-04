@@ -4,11 +4,6 @@
 # Purpose:              Xpose: initialisation
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import sys, json
 from pathlib import Path
 from importlib import import_module

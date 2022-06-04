@@ -13,6 +13,9 @@ where
 
 The command above assumes the name of the XPOSE package is xpose (default). It may be changed, in which case it must be changed in the ``-m`` option above, and must also be explicitly provided with option ``-x``.
 
+Available types and functions
+-----------------------------
+
 .. automodule:: XPOSE.initial
    :members:
    :member-order: bysource

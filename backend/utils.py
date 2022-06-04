@@ -4,11 +4,6 @@
 # Purpose:              Xpose: misc utilities
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import sys,os,json,re
 from pathlib import Path
 from contextlib import contextmanager

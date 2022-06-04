@@ -4,11 +4,6 @@
 # Purpose:              Xpose: attachment operations
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import shutil
 from functools import cached_property
 from pathlib import Path

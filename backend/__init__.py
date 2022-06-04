@@ -4,18 +4,14 @@
 # Purpose:              Xpose: a JSON database manager (server side)
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import sqlite3,json
 from functools import cached_property
 from pathlib import Path
 from typing import Optional, Union, Callable, Dict, Any
 from .utils import get_config,set_config # not used, but made available
-assert hasattr(Path,'hardlink_to'), 'You are using a version of python<3.10; try the fix below'
-# Path.hardlink_to = lambda self,target: Path(target).link_to(self)
+if not hasattr(Path,'hardlink_to'): # for python versions < 3.10
+  setattr(Path,'hardlink_to',lambda self,target,link_to=getattr(Path,'link_to'): link_to(target,self))
+  from warnings import warn; warn('Method \'hardlink_to\' has been added to class \'pathlib.Path\' for python version < 3.10')
 sqlite3.register_converter('JSON',json.loads)
 sqlite3.register_adapter(dict,json.dumps)
 sqlite3.enable_callback_tracebacks(True)
@@ -40,7 +36,14 @@ An instances of this base class is a resource for processing Xpose operations. A
 #----------------------------------------------------------------------------------------------------------------------
   def connect(self,**ka):
     r"""
-Returns a :class:`sqlite3.Connection` opened on the index database. The keyword arguments *ka* are passed as such to the connection constructor.
+Returns a :class:`sqlite3.Connection` opened on the index database. The keyword arguments *ka* are passed as such to the connection constructor. Various subclasses can extend this method in order to make some of the following sqlite functions available in contexts where they are needed:
+
+* ``create_attach`` *oid* ↦ *attach*: maps the *oid* field to the *attach* fields of an entry
+* ``delete_attach`` *oid* ↦ :const:`None`: called when an entry with a given *oid* field is deleted
+* ``authorise`` *level* ↦ *yes-no*: maps an access *level* to a *yes-no* boolean indicating whether access is granted at that level, given credentials from the context
+* ``authoriser`` *level*, *path* ↦ :const:`None`: sets the access control to *path* to the given *level*
+* ``uid2key`` *uid* ↦ *key*: maps a *uid* (permanent identifier) into a *key* value which can be used to retrieve an entry (typically from a UNIQUE index)
+* ``apply_template`` *tmpl*, *err_tmpl*, *rendering*, *args* ↦ :const:`None`: applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies template *err_tmpl* instead
     """
 #----------------------------------------------------------------------------------------------------------------------
     return sqlite3.connect(self.index_db,**ka)

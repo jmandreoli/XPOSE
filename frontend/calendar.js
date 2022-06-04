@@ -49,18 +49,16 @@ class DetailedEventSource {
       const year = addElement(navigation,'select',{style:'font-size:x-small;'})
       const month = addElement(navigation,'select',{style:'display:none;position:absolute;z-index:100;font-size:x-small;',size:12})
       addElement(year,'option',{selected:'selected'}).innerText = 'Jump to...'
+      year.addEventListener('change',()=>{if(year.selectedIndex==0)return;month.style.display='';month.selectedIndex=-1;month.focus()})
+      month.addEventListener('change',()=>{calendar.gotoDate(`${year.selectedOptions[0].value}-${month.value}-01`);year.selectedIndex=0;month.style.display='none'})
       month.addEventListener('blur',()=>{year.selectedIndex=0;month.style.display='none'})
-      for (let y=config.span[1];y>=config.span[0];y--) {
-        const o = addElement(year,'option')
-        o.innerText = String(y)
-        o.addEventListener('click',()=>{month.style.display='';month.selectedIndex=-1;month.focus()})
-      }
+      for (let y=config.span[1];y>=config.span[0];y--) { addElement(year,'option').innerText = String(y) }
       ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach((m,i)=>{
+        //addElement(month,'option',{value:String(i+1).padStart(2,'0')}).innerText = m
         const o = addElement(month,'option',{value:String(i+1).padStart(2,'0'),style:'background-color:white;color:black;'})
         o.innerText = m
         o.addEventListener('mouseenter',()=>{o.style.filter='invert(100%)'})
         o.addEventListener('mouseleave',()=>{o.style.filter='invert(0%)'})
-        o.addEventListener('click',()=>{calendar.gotoDate(`${year.selectedOptions[0].value}-${o.value}-01`);year.selectedIndex=0;month.style.display='none'})
       })
     }
     {
@@ -75,14 +73,16 @@ class DetailedEventSource {
     for (const h of (config.headers||[])) { header.insertCell().innerHTML = h }
 
     this.getEvents = config.events
-
+    this.processHooks = []
     if (window.Showdown) {
       const conv = new showdown.Converter(window.Showdown)
-      this.transformMarkdown = (a) => {for(const el of a){el.innerHTML = conv.makeHtml(el.innerHTML)}}
+      this.processHooks.push((details)=>{for(const el of details.getElementsByClassName('transform-markdown')){el.innerHTML = conv.makeHtml(el.innerHTML)}})
     }
     if (window.MathJax) {
-      this.transformMath = (a) => {if(a.length)window.MathJax.typeset(a)}
+      this.processHooks.push((details)=>{window.MathJax.typeset(Array.from(details.getElementsByClassName('transform-math')))})
     }
+    this.processHooks.push(...(config.processHooks||[]))
+    this.focus = config.focus||(()=>{})
     this.currentYears = null
     calendar.addEventSource({id:config.id,events:(info,success,failure)=>this.events(info,success,failure)})
   }
@@ -104,8 +104,7 @@ class DetailedEventSource {
   process (data) {
     this.el_details.innerHTML = ''
     const events = data.map(row=>this.processRow(row))
-    if (this.transformMarkdown) { this.transformMarkdown(Array.from(this.el_details.getElementsByClassName('transform-markdown'))) }
-    if (this.transformMath) { this.transformMath(Array.from(this.el_details.getElementsByClassName('transform-math'))) }
+    for (const hook of this.processHooks) hook(this.el_details)
     return events
   }
 
@@ -123,6 +122,9 @@ class DetailedEventSource {
     let status = tbody.dataset.right||''
     if (status) {status = `<div class="status">${status}</div>`}
     td.innerHTML = `<span title="${row.access}" style="visibility:${row.access?'visible':'hidden'};style:x-small;">🔒</span>${this.formatSpan(row.start,row.end)} ${extra} ${status}`
+    const span = addElement(td,'span',{class:'shadow'})
+    span.innerText = '🔗'
+    span.addEventListener('click',()=>{this.focus(row.uid)})
     return ev
   }
 
@@ -135,8 +137,8 @@ class DetailedEventSource {
       `${startDate.toDateString()} at ${this.formatTime(startDate)}` // punctual
   }
   formatTime (t) {
-    const m = t.getMinutes()
-    return `${1+((t.getHours()-1)%12+12)%12}${m?':'+String(m).padStart(2,'0'):''}${t.getHours()<12?'am':'pm'}` // ugly!
+    const m = t.getMinutes(), h = t.getHours()
+    return `${1+((h-1)%12+12)%12}${m?':'+String(m).padStart(2,'0'):''}${h<12?'am':'pm'}` // ugly!
   }
 }
 

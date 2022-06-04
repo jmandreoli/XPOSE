@@ -4,11 +4,6 @@
 # Purpose:              Xpose: access control operations
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import os,re
 from functools import cached_property
 from pathlib import Path

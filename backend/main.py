@@ -4,11 +4,6 @@
 # Purpose:              Xpose: dashboard CGI resources
 #
 
-r"""
-Available types and functions
------------------------------
-"""
-
 import sqlite3,json
 from datetime import datetime
 from pathlib import Path

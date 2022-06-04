@@ -5,3 +5,5 @@
 .calendar-details tbody.event div.title { font-weight: bold; }
 .calendar-details tbody.event td.detail { background-color: #f0f0f0; padding: .8mm; }
 .calendar-details tbody.event div.status { float:right; color: Gold; font-weight: bold; font-size: small; }
+.calendar-details tbody.event .shadow { opacity: .5; padding: 1mm; }
+.calendar-details tbody.event .shadow:hover { opacity: 1.0; outline: thin solid black; }
