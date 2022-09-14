@@ -21,7 +21,8 @@ CREATE TABLE Entry (
   created DATETIME NOT NULL,
   modified DATETIME NOT NULL,
   access TEXT NULLABLE,
-  memo TEXT NULLABLE -- JSON
+  memo TEXT NULLABLE, -- JSON
+  uid TEXT UNIQUE GENERATED ALWAYS AS ( format("%x%05x",unixepoch(datetime(created)),substring(created,1+instr(created,"."))) ) STORED
 );
 
 CREATE TRIGGER EntryTriggerInsert AFTER INSERT ON Entry
@@ -35,7 +36,7 @@ CREATE TRIGGER EntryTriggerDelete AFTER DELETE ON Entry
 
 CREATE INDEX EntryIndexCat ON Entry ( cat );
 CREATE INDEX EntryIndexModified ON Entry ( modified );
-CREATE UNIQUE INDEX EntryIndexCreated ON Entry ( created );
+CREATE INDEX EntryIndexCreated ON Entry ( created );
 
 CREATE TABLE Short (
   entry INTEGER PRIMARY KEY REFERENCES Entry,
@@ -51,7 +52,7 @@ CREATE VIEW EntryFull AS -- Use only with detect_types=sqlite3.PARSE_COLNAMES
   SELECT version,cat,value AS "value [JSON]",attach AS "attach [ATTACH]",created,modified,access,memo AS "memo [JSON]" FROM Entry;
 
 CREATE VIEW EntryShort AS
-  SELECT oid,version,cat,Entry.value AS value,attach,created,modified,access,memo,Short.value AS short FROM Entry LEFT JOIN Short ON Short.entry=oid;
+  SELECT oid,version,cat,Entry.value AS value,attach,created,modified,access,memo,uid,Short.value AS short FROM Entry LEFT JOIN Short ON Short.entry=oid;
 '''
 
 RoutingCode = f'''#!{sys.executable}
@@ -111,7 +112,7 @@ Loads some entries in the index database. Entries are validated, and behaviour i
     if not listing: return
     with self.connect() as conn:
       conn.row_factory = sqlite3.Row
-      fields = tuple(field for r in conn.execute('PRAGMA table_info(Entry)') if (field:=r['name'])!='oid')
+      fields = tuple(field for r in conn.execute('PRAGMA table_info(Entry)') if (field:=r['name'])!='oid') # note: table_info returns only non-hidden fields
     def entry(row,fields=fields,field_set=frozenset(fields)):
       assert set(row) == field_set, set(row)^field_set
       self.cats.validate(row['cat'],row['value'])
@@ -240,7 +241,7 @@ Initialises an Xpose instance.
     if routes.get(key) is None: routes[key] = default()
   release:int = cfg.get('release',0)
   assert isinstance(release,int) and release >= 0
-  upgrades:list[Callable[[list],None]] = [cfg[f'upgrade_{n}'] for n in range(release)]
+  upgrades:list[Callable[[list],None]] = [cfg.get(f'upgrade_{n}') for n in range(release)]
   # collect current entry listing
   if dump is None: listing = n_upgrades = n_loaded = None
   else:

@@ -42,7 +42,6 @@ Returns a :class:`sqlite3.Connection` opened on the index database. The keyword 
 * ``delete_attach`` *oid* ↦ :const:`None`: called when an entry with a given *oid* field is deleted
 * ``authorise`` *level* ↦ *yes-no*: maps an access *level* to a *yes-no* boolean indicating whether access is granted at that level, given credentials from the context
 * ``authoriser`` *level*, *path* ↦ :const:`None`: sets the access control to *path* to the given *level*
-* ``uid2key`` *uid* ↦ *key*: maps a *uid* (permanent identifier) into a *key* value which can be used to retrieve an entry (typically from a UNIQUE index)
 * ``apply_template`` *tmpl*, *err_tmpl*, *rendering*, *args* ↦ :const:`None`: applies a genshi template *tmpl* rendered as *rendering* with arguments *args*; in case of error, applies template *err_tmpl* instead
     """
 #----------------------------------------------------------------------------------------------------------------------

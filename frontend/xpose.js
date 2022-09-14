@@ -17,10 +17,10 @@ import manageView from './xpose-manage.js'
 class Xpose {
   constructor (config) {
     this.url = config.url
-    this.dataUrl = config.data
+    this.variant = (document.cookie.split('; ').find(row=>row.startsWith('xpose-variant='))||'').slice(14)
+    this.dataUrl = config.data+(this.variant?`/${this.variant}`:'')
     this.current = null
     this.dirty = false
-    this.variant = (document.cookie.split('; ').find(row=>row.startsWith('xpose-variant='))||'').slice(14)
     const views = config.views||{}
     this.views = {}
     const default_views = { listing:listingView, entry:entryView, attach:attachView, manage:manageView }

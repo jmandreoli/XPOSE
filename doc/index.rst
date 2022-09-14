@@ -37,8 +37,7 @@ The index database has a table ``Entry`` which stores all the raw meta-informati
 * ``modified``: last modification timestamp of this entry (ISO format as above)
 * ``access``: an access control level for this entry
 * ``memo``: JSON encoded data, with no specific JSON schema (untouched by the dashboard)
-
-Note that field ``created`` is unique for each entry and can be used as permanent identifier (unlike ``oid`` which may change when the Xpose instance evolves).
+* ``uid``: a permanent identifier for the entry (unlike ``oid`` which may change when the Xpose instance evolves)
 
 .. note::
    Table ``Entry`` holds all the meta-information of the XPOSE instance. All the other tables, triggers, views, indexes etc. contain information derived from table ``Entry`` and are created and populated by the categories. This redundancy is only meant for efficiency.

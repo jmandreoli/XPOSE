@@ -53,21 +53,22 @@ class DetailedEventSource {
       month.addEventListener('change',()=>{calendar.gotoDate(`${year.selectedOptions[0].value}-${month.value}-01`);year.selectedIndex=0;month.style.display='none'})
       month.addEventListener('blur',()=>{year.selectedIndex=0;month.style.display='none'})
       for (let y=config.span[1];y>=config.span[0];y--) { addElement(year,'option').innerText = String(y) }
-      ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].forEach((m,i)=>{
-        //addElement(month,'option',{value:String(i+1).padStart(2,'0')}).innerText = m
-        const o = addElement(month,'option',{value:String(i+1).padStart(2,'0'),style:'background-color:white;color:black;'})
-        o.innerText = m
-        o.addEventListener('mouseenter',()=>{o.style.filter='invert(100%)'})
-        o.addEventListener('mouseleave',()=>{o.style.filter='invert(0%)'})
-      })
+      for (const m of ['01Jan','02Feb','03Mar','04Apr','05May','06Jun','07Jul','08Aug','09Sep','10Oct','11Nov','12Dec']) {
+        const o = addElement(month,'option',{value:m.slice(0,2),style:'background-color:white;color:black;'}); o.innerText = m.slice(2)
+        o.addEventListener('mouseenter',()=>{o.style.filter='invert(100%)'}); o.addEventListener('mouseleave',()=>{o.style.filter='invert(0%)'}) //does not seem to work on Safari
+      }
     }
     {
-      header.insertCell().innerHTML = '<span> Sources: </span>'
-      this.sources = Object.fromEntries(config.sources.map((src)=>{
-        const td = header.insertCell(); td.innerHTML = src.id
-        Object.assign(td.style,{backgroundColor:src.options.backgroundColor||='black',color:src.options.textColor||='white'})
-        return [src.id,src]
-      }))
+      const sources = header.insertCell()
+      const button = addElement(sources,'button',{style:'font-size:x-small;',title:'Click to display the list of event sources'})
+      button.innerText = '↓Sources'
+      const list = addElement(sources,'div',{style:'font-size:x-small;display:none;position:absolute;z-index:100;'})
+      this.sources = {}
+      for (const src of config.sources) {
+        addElement(list,'div',{style:`border-top:thin solid black;padding:1px;background-color:${src.options.backgroundColor||='black'};color:${src.options.textColor||='white'}`}).innerText = src.id
+        this.sources[src.id] = src
+      }
+      button.addEventListener('click',()=>{list.style.display=''}); button.addEventListener('mouseleave',()=>{list.style.display='none'})
     }
 
     for (const h of (config.headers||[])) { header.insertCell().innerHTML = h }
@@ -76,7 +77,7 @@ class DetailedEventSource {
     this.processHooks = []
     if (window.Showdown) {
       const conv = new showdown.Converter(window.Showdown)
-      this.processHooks.push((details)=>{for(const el of details.getElementsByClassName('transform-markdown')){el.innerHTML = conv.makeHtml(el.innerHTML)}})
+      this.processHooks.push((details)=>{for(const el of details.getElementsByClassName('transform-markdown')){el.innerHTML = conv.makeHtml(el.textContent)}})
     }
     if (window.MathJax) {
       this.processHooks.push((details)=>{window.MathJax.typeset(Array.from(details.getElementsByClassName('transform-math')))})
@@ -84,7 +85,7 @@ class DetailedEventSource {
     this.processHooks.push(...(config.processHooks||[]))
     this.focus = config.focus||(()=>{})
     this.currentYears = null
-    calendar.addEventSource({id:config.id,events:(info,success,failure)=>this.events(info,success,failure)})
+    calendar.addEventSource({id:config.id,events:(info)=>this.events(info)})
   }
 
   events (info) {

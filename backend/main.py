@@ -63,7 +63,7 @@ Output (text/json): JSON encoded dict with keys ``oid``, ``version``, ``short``,
 #----------------------------------------------------------------------------------------------------------------------
     entry = self.parse_input()
     oid,version,access,value = entry.get('oid'),entry.get('version'),entry['access'],json.dumps(entry['value'])
-    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')
+    now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')
     if oid is None:
       version=0
       sql = 'INSERT INTO Entry (version,cat,value,created,modified,access) VALUES (?,?,?,?,?,?) RETURNING oid',(version+1,entry['cat'],value,now,now,access)
