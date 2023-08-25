@@ -47,7 +47,6 @@ class Xpose {
     if (this.current===view) return
     if (this.current!==null) { this.current.toplevel.style.display = 'none' }
     this.current = view
-    this.el_view.innerText = view.name
     this.current.toplevel.style.display = ''
   }
 
@@ -75,11 +74,6 @@ class Xpose {
   render() {
     {
       this.el_progress = addElement(document.body,'div',{class:'xpose-progress'})
-    }
-    {
-      const h1 = addElement(document.body,'h1')
-      addText(h1,'Xpose: ')
-      this.el_view = addElement(h1,'span')
     }
     {
       this.console = addElement(document.body,'div',{class:'caution',style:'position:absolute; left:0; right:0; z-index:100; display:none'})

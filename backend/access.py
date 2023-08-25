@@ -53,7 +53,7 @@ An instance of this class manages access to the xpose instances. This implementa
           case 'group': return f'(credentials.groups.get({repr(m.group(2))}) is not None)'
           case 'ldap-user':
             L = m.group(2).split()
-            return f'(credentials.ldap_user in ({",".join(map(repr,L))}))' if L else f'(credentials.user == {repr(L[0])})'
+            return f'(credentials.ldap_user in ({",".join(map(repr,L))}))' if len(L)>1 else f'(credentials.user == {repr(L[0])})'
           case 'ldap-group': return f'(credentials.ldap_groups.get({repr(m.group(2))}) is not None)'
           case _: Exception(f'Unsupported Require type: {m.group(1)}')
       def check_compound(d):

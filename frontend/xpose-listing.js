@@ -9,9 +9,8 @@ import { encodeURIqs, addElement, addJButton, addText, toggle_display, AjaxError
 export default class listingView {
 
   constructor () {
-    this.toplevel = document.createElement('table')
-    const thead = addElement(this.toplevel,'thead')
-    const menu = thead.insertRow().insertCell()
+    this.toplevel = document.createElement('div')
+    const menu = addElement(this.toplevel,'div')
     { // refresh button
       const button = this.el_refresh = addJButton(menu,'refresh',{title:'Refresh listing'})
       button.addEventListener('click',()=>this.display().catch(err=>this.onerror(err)))
@@ -32,15 +31,17 @@ export default class listingView {
     }
     { // info box (number of entries)
       addText(menu)
+      addText(addElement(menu,'b'),'XPOSE listing')
+      addText(menu,': ')
       const span = this.el_count = addElement(menu,'span')
       addText(menu,' entries')
     }
     { // query editor
-      const div = addElement(thead.insertRow().insertCell(),'div',{style:'display:none'})
+      const div = addElement(this.toplevel,'div',{style:'display:none'})
       this.editor = new JSONEditor(div,this.editorConfig())
     }
     { // listing table
-      this.el_main = addElement(this.toplevel,'tbody',{class:'listing'})
+      this.el_main = addElement(addElement(addElement(this.toplevel,'div'),'table'),'tbody',{class:'listing'})
     }
     this.active = false
     this.editor.on('change',()=>{if (this.active) {this.set_dirty(true)} else {this.active=true} })

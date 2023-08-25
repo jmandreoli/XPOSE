@@ -9,9 +9,8 @@ import { human_size, encodeURIqs, addElement, addJButton, addText, noopAlert, Aj
 export default class attachView {
 
   constructor () {
-    this.toplevel = document.createElement('table')
-    const thead = addElement(this.toplevel,'thead')
-    const menu = thead.insertRow().insertCell()
+    this.toplevel = document.createElement('div')
+    const menu = addElement(this.toplevel,'div')
     { // return button
       const button = addJButton(menu,'arrowreturnthick-1-w',{title:'Return to entry view'})
       button.addEventListener('click',()=>this.close().catch(err=>this.onerror(err)))
@@ -33,12 +32,14 @@ export default class attachView {
     }
     { // infobox (entry short name and path)
       addText(menu)
+      addText(addElement(menu,'b'),'XPOSE attach')
+      addText(menu,': ')
       this.el_short = addElement(menu,'span')
       addText(menu)
       this.el_path = addElement(menu,'span')
     }
     { // listing table
-      this.el_main = addElement(this.toplevel,'tbody',{class:'attach'})
+      this.el_main = addElement(addElement(this.toplevel,'table'),'tbody',{class:'attach'})
     }
     this.entry = null
     this.path = null

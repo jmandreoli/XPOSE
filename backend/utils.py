@@ -11,7 +11,7 @@ from functools import singledispatch
 from datetime import datetime
 from http import HTTPStatus
 from urllib.parse import parse_qsl,urljoin
-from typing import Callable, Any
+from typing import Optional
 
 #======================================================================================================================
 class CGIMixin:
@@ -88,58 +88,64 @@ Parses input stream according to *mime*:
 #======================================================================================================================
 class IntStrConverter:
   r"""
-An instance of this class is a bijection between the interval of whole numbers from 0 (inclusive) to 0x100000 (exclusive) and the set of strings of length 4 of characters in *symbols*. Suitable for defining attachment paths. Example::
+An instance of this class is a bijection between the interval of whole numbers :math:`\{0\cdots2^D{-}1\}` and the set of strings of length :math:`K=\frac{D}{P}` of characters in *symbols*, which must be a string of length :math:`2^P` with no repetition. Example with all default parameters (where :math:`D=20,P=5,K=4`)::
 
-   c = IntStrConverter() # all parameters are initialised randomly
-   L = list(range(0x100000))
-   assert [c.str2int(s) for s in [c.int2str(n) for n in L]] == L
+   c = IntStrConverter() # all default parameters
+   assert all(c.str2int(c.int2str(n))==n for n in range(c.bound+1))
 
-:param shift: any integer
-:param perm: a permutation of (0,...,19)
-:param symbols: a string of length 32 where each character occurs only once
+:param symbols: a string with no repetition, clipped to have a size of the form :math:`2^P` (default: random string of size :math:`32`)
+:param perm: a permutation of (:math:`0,\cdots,D-1`) or the integer :math:`K` (permutation randomly generated with :math:`D=KP`)
+:param shift: a non negative integer (default: random)
   """
 #======================================================================================================================
-  shift : int
-  perm : tuple[int,...]
   symbols : dict[str,str]
-  perm_: tuple[int,...] # inverse of perm
+  perm : tuple[int,...]
+  shift : int
   symbols_: dict[str,str] # inverse of symbols
+  perm_: tuple[int,...] # inverse of perm
+  shift_: int # complement of shift
+  D: int
+  bound: int
+  slices: tuple[slice,...]
 
-  def __init__(self,shift:int=None,perm:tuple[int,...]=None,symbols:str=None):
-    from random import randint, shuffle
+  def __init__(self,symbols:Optional[str]=None,perm:tuple[int,...]|int=4,shift:Optional[int]=None):
+    from random import shuffle, getrandbits
     from string import ascii_letters, digits
-    if shift is None: shift = randint(0,0x100000)
-    else: assert isinstance(shift,int)
-    if perm is None: p = list(range(20)); shuffle(p); perm = tuple(p)
-    else: assert set(perm) == set(range(20))
-    if symbols is None: s = list(digits+ascii_letters); shuffle(s); symbols = ''.join(s[:32])
-    else: assert isinstance(symbols,str) and len(symbols) == 32 and len(set(symbols)) == 32
-    self.shift,self.perm = shift,perm
-    self.perm_ = tuple(self.perm.index(i) for i in range(20))
-    bs = [f'{i:05b}' for i in range(32)]
-    self.symbols = dict(zip(bs,symbols))
-    self.symbols_ = dict(zip(symbols,bs))
+    from math import log2
+    P: int; D:int
+    if symbols is None: s = list(digits+ascii_letters); shuffle(s); P=5; symbols = ''.join(s[:32])
+    else: assert isinstance(symbols,str) and len(set(symbols)) == len(symbols); P = int(log2(len(symbols))); symbols = symbols[:(1<<P)]
+    if isinstance(perm,int): D = perm*P; perml = list(range(D)); shuffle(perml); perm = tuple(perml)
+    else: D = len(perm); assert D%P==0 and set(perm) == set(range(D))
+    bound = (1<<D)-1
+    if shift is None: shift = getrandbits(D)
+    else: assert isinstance(shift,int) and shift>=0; shift &= bound
+    self.D,self.shift,self.perm,self.bound,self.slices = D,shift,perm,bound,tuple(slice(i,i+P) for i in range(0,D,P))
+    self.shift_ = bound-shift+1
+    self.perm_ = tuple(perm.index(i) for i in range(D))
+    fmt = f'0{P}b'; bits = [format(i,fmt) for i in range(len(symbols))]
+    self.symbols = dict(zip(bits,symbols))
+    self.symbols_ = dict(zip(symbols,bits))
 
 #----------------------------------------------------------------------------------------------------------------------
   def int2str(self,n:int)->str:
-    r""":param n: value to convert"""
+    r""":param n: a whole number between :math:`0` and :math:`2^D-1` (not checked)"""
 #----------------------------------------------------------------------------------------------------------------------
-    #assert isinstance(n,int) and 0 <= n < 0x100000
-    n = (n+self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
-    x = f'{n:020b}' # convert: 20-bit-int -> 20-bit-str
-    x = ''.join(x[i] for i in self.perm) # permute: 20-bit-str -> 20-bit-str
-    return ''.join(self.symbols[x[i:i+5]] for i in range(0,20,5)) # segment: 20-bit-str -> 4-symbol-str
+    #assert isinstance(n,int) and 0 <= n <= self.bound # check n: bounded-int
+    n = (n+self.shift)&self.bound # shift: bounded-int -> bounded-int
+    x = format(n,'b').rjust(self.D,'0') # convert: bounded-int -> bit-str
+    x = ''.join(x[i] for i in self.perm) # permute: bit-str -> bit-str
+    return ''.join(self.symbols[x[s]] for s in self.slices) # segment: bit-str -> symbol-str
 
 #----------------------------------------------------------------------------------------------------------------------
   def str2int(self,x:str)->int:
-    r""":param x: value to convert"""
+    r""":param x: a string of symbols of length :math:`K` (not checked)"""
 #----------------------------------------------------------------------------------------------------------------------
-    #assert isinstance(x,str) and len(x)==4 and all(u in self.symbols_ for u in x)
-    x = ''.join(self.symbols_[u] for u in x) # segment: 4-symbol-str -> 20-bit-str
-    x = ''.join(x[i] for i in self.perm_) # permute: 20-bit-str -> 20-bit-str
-    n = int(x,2) # convert: 20-bit-str -> 20-bit-int
-    return (n-self.shift)%0x100000 # shift: 20-bit-int -> 20-bit-int
-
+    #assert isinstance(x,str) and len(x)==len(self.slices) and all(u in self.symbols_ for u in x) # check x: symbol-str
+    x = ''.join(self.symbols_[u] for u in x) # segment: symbol-str -> bit-str
+    x = ''.join(x[i] for i in self.perm_) # permute: bit-str -> bit-str
+    n = int(x,2) # convert: bit-str -> bounded-int
+    return (n+self.shift_)&self.bound # shift: bounded-int -> bounded-int
 
 #======================================================================================================================
 class Backup:

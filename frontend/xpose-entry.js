@@ -38,6 +38,8 @@ export default class entryView {
     }
     { // info box (short name of entry)
       addText(menu)
+      addText(addElement(menu,'b'),'XPOSE entry')
+      addText(menu,': ')
       const span = this.el_short = addElement(menu,'span')
     }
     { // access editor form
@@ -77,7 +79,10 @@ export default class entryView {
   async save () {
     if (!this.get_dirty()) { return noopAlert() }
     const errors = this.editor.validate()
-    if (errors.length) { return this.error('validation',errors) }
+    if (errors.length) {
+      const errors_t = errors.map((err)=>`${err.path}:${err.property} ${err.message}`)
+      throw new Error(`The following error(s) occurred:\n${errors_t.join('\n')}`)
+    }
     this.entry.value = this.editor.getValue()
     this.entry.access = this.accessEditor.getValue()||null
     this.editor.disable()

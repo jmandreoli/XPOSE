@@ -35,14 +35,14 @@ An instance of this class manages an xpose instance's attachments (field ``attac
     def E(p:Path)->tuple[bool,str,str,int]:
       s = p.stat(); return p.is_dir(),p.name,datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds'),(s.st_size if p.is_file() else -len(list(p.iterdir())))
     if not path.is_dir(): return []
-    content = sorted(map(E,path.iterdir()))
-    L:list[Any] = content
-    while not L:
-      path.rmdir()
-      path = path.parent
-      if path==self.root: break
-      L = list(path.iterdir())
-    return [x[1:] for x in content]
+    if (content:=sorted(map(E,path.iterdir()))): return [x[1:] for x in content]
+    while True: # recursively remove all empty ancestors (up to root)
+      try: path.rmdir()
+      except: break
+      else:
+        path = path.parent
+        if path==self.root: break
+    return []
 
 #----------------------------------------------------------------------------------------------------------------------
   def perform(self,path:Path,src,trg,is_new:bool):

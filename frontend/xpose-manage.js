@@ -33,13 +33,14 @@ export default class manageView {
       button.addEventListener('click',()=>this.shadow().catch(err=>this.onerror(err)))
     }
     { // infobox
-      addText(menu,' Xpose instance: ')
-      this.el_version = addElement(menu,'b')
+      addText(menu)
+      addText(addElement(menu,'b'),'XPOSE instance')
+      addText(menu,': ')
+      this.el_version = addElement(menu,'span')
     }
     {
-      const div = addElement(this.toplevel,'div')
       this.el_stats = {}
-      const table = addElement(div,'table',{class:'manage-stats'})
+      const table = addElement(addElement(this.toplevel,'div'),'table',{class:'manage-stats'})
       const thead = addElement(table,'thead')
       const td = thead.insertRow().insertCell()
       td.colSpan = '2'; td.innerText = 'Statistics'
