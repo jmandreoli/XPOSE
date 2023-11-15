@@ -34,6 +34,41 @@ function addJButton(container,icon,attrs) {
   addElement(button,'span',{class:`ui-icon ui-icon-${icon}`})
   return button
 }
+function addImageViewer(container,seq,width='640px',timer=3) {
+  // seq: list of urls to images
+  // width: width of the image area
+  // timer: menu fadeout time in seconds
+	let ind = 0
+	const n = seq.length
+	const div = addElement(container,'div')
+	Object.assign(div.style,{position:'relative',width:width})
+	const img = addElement(div,'img',{width:'100%'})
+	const menu = addElement(div,'div')
+	Object.assign(menu.style,{position:'absolute',top:'0',left:'0',right:'0'})
+	const bprev = addElement(menu,'button'); addText(bprev,'<')
+	const blist = []
+	for (let k=0;k<n;k++) { const b = addElement(menu,'button'); addText(b,String(k)); blist.push(b) }
+	const bnext = addElement(menu,'button'); addText(bnext,'>')
+	for (let b of [bprev,bnext,...blist]) { Object.assign(b.style,{border:'thin solid black',padding:'1mm',fontFamily:'monospace'}) }
+	bnext.addEventListener('click',()=>{ind++; if (ind==n) ind=0; display()})
+	bprev.addEventListener('click',()=>{if (ind==0) ind=n; ind--; display()})
+	for (let k=0;k<n;k++) { const k_ = k; blist[k].addEventListener('click',()=>{ind=k_; display()}) }
+	const display = () => {
+		for (let k=0;k<n;k++) { Object.assign(blist[k].style,{outline:(k==ind?'thin solid blue':'')}) }
+		img.setAttribute('src',seq[ind])
+	}
+	const total = Math.floor(timer*1000/100)+1 // number of 100ms periods for a fadeout sequence
+	let countdown = total
+	const reset = () => { countdown = total; menu.style.display = ''; menu.style.opacity = 1; }
+	div.addEventListener('mousemove',(ev)=>{if (ev.offsetY<15) reset()})
+	menu.addEventListener('mousemove',reset)
+	menu.addEventListener('click',reset)
+	setInterval(()=>{
+	  if (countdown==0) { menu.style.display = 'none' }
+	  else if (--countdown<10) { menu.style.opacity = countdown/10 }
+	},100)
+	display()
+}
 function addHeadMark(val,exception,style) {
   if (exception && exception(val)) return
   const [div,div_] = [1,2].map(()=>document.createElement('div')); document.body.prepend(div,div_); div.innerText = val
@@ -60,4 +95,4 @@ class AjaxError extends Error {
   }
 }
 
-export { human_size, encodeURIqs, addElement, addJButton, addHeadMark, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert, AjaxError }
+export { human_size, encodeURIqs, addElement, addImageViewer, addJButton, addHeadMark, addText, toggle_display, unsavedConfirm, deleteConfirm, noopAlert, AjaxError }
