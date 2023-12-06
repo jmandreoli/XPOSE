@@ -29,7 +29,7 @@ class Xpose {
   }
   addView (name,view) {
     view.onerror = (err) => this.onerror(name,err)
-    view.progressor = (label) => this.progressor(`${name}:${label}`)
+    view.progressor = (label,max) => this.progressor(`${name}:${label}`,max)
     view.variant = this.variant
     view.toggle_variant = () => this.toggle_variant()
     view.set_dirty = (flag) => { this.dirty = flag; view.show_dirty(flag); }
@@ -50,18 +50,18 @@ class Xpose {
     this.current.toplevel.style.display = ''
   }
 
-  progressor (label) {
+  progressor (label,max) {
     // displays a progress bar and returns an object with the following fields:
-    //   update: an update callback to pass to the target task (argument: percent_complete)
+    //   update: an update callback to pass to the target task (argument: amount_performed)
     //   close: a close callback (no argument)
     const div = addElement(this.el_progress,'div')
-    const el = addElement(div,'progress',{max:'1.',value:'0.',})
+    const el = addElement(div,'progress',{max:max,value:0.,})
     const button = addJButton(div,'closethick',{title:'Interrupt upload'})
     addText(div,label)
     let cancelled = false
     button.addEventListener('click',()=>{cancelled=true})
     return {
-      update:(percent)=>{el.value=percent.toFixed(3);return cancelled},
+      update:(val)=>{el.value=val;return cancelled},
       close:()=>{this.el_progress.removeChild(div)}
     }
   }

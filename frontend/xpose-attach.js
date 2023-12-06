@@ -73,12 +73,12 @@ export default class attachView {
 
   async upload (files) {
     const outcomes = await Promise.allSettled(Array.from(files).map(file=>{
-      const progressor = this.progressor(file.name)
+      const progressor = this.progressor(file.name,file.size)
       const controller = new AbortController()
       return axios.post(`${this.url}/attach`,file,{
         headers:{'Content-Type':'application/octet-stream','Transfer-Encoding':'chunked'},
         signal:controller.signal,
-        onUploadProgress:(evt)=>{if(progressor.update(evt.loaded/file.size)){controller.abort()}}
+        onUploadProgress:(evt)=>{if(progressor.update(evt.loaded)){controller.abort()}}
       }).finally(()=>progressor.close())
     }))
     const errors = []
