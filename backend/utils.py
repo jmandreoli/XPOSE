@@ -8,7 +8,7 @@ import sys,os,json,re
 from pathlib import Path
 from contextlib import contextmanager
 from functools import singledispatch
-from datetime import datetime
+from datetime import datetime, UTC
 from http import HTTPStatus
 from urllib.parse import parse_qsl,urljoin
 from typing import Optional
@@ -243,7 +243,7 @@ With method GET, *url* can be a simple path to an existing file (*ka* must then 
 class HTTPException (Exception):
   def __init__(self,status:HTTPStatus): self.status = status
 def http_raise(status): raise HTTPException(status)
-def http_ts(ts:float)->str: return datetime.utcfromtimestamp(ts).strftime('%a, %d %b %Y %H:%M:%S GMT')
+def http_ts(ts:float)->str: return datetime.fromtimestamp(ts,UTC).strftime('%a, %d %b %Y %H:%M:%S GMT')
 
 def default_attach_namer(n:int,split=(lambda x: f'{x[:2]}/{x[-2:]}'))->str: return split(f'{n:04x}')
 

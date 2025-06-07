@@ -69,8 +69,7 @@ function addImageViewer(container,seq,width='640px',timer=3) {
 	},100)
 	display()
 }
-function addHeadMark(val,exception,style) {
-  if (exception && exception(val)) return
+function addHeadMark(val,style) {
   const [div,div_] = [1,2].map(()=>document.createElement('div')); document.body.prepend(div,div_); div.innerText = val
   const style_ = {position:'fixed',left:'0',right:'0',top:'0',zIndex:'100',backgroundColor:'pink',textAlign:'center',fontSize:'x-large'}
   if (style) { Object.assign(style_,style) }

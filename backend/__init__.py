@@ -5,9 +5,12 @@
 #
 
 import sqlite3,json
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Optional, Union, Callable, Dict, Any
+from referencing import Registry
+from referencing.jsonschema import DRAFT202012
+from jsonschema import Draft202012Validator
 from .utils import get_config,set_config # not used, but made available
 if not hasattr(Path,'hardlink_to'): # for python versions < 3.10
   setattr(Path,'hardlink_to',lambda self,target,link_to=getattr(Path,'link_to'): link_to(target,self))
@@ -66,6 +69,12 @@ An instance of this class manages all the xpose instance's categories (field ``c
   def __init__(self,root:Path):
     self.root = root.resolve()
     self.validators = {}
+    @lru_cache()
+    def retrieve(uri:str):
+      with open(uri) as u: schema = json.load(u)
+      Draft202012Validator.check_schema(schema)
+      return DRAFT202012.create_resource(schema)
+    self.registry = Registry(retrieve=retrieve)
 
 #----------------------------------------------------------------------------------------------------------------------
   def initial(self,**ka):
@@ -87,11 +96,7 @@ Checks that *value*, viewed as a json object, conforms to the json schema associ
 #----------------------------------------------------------------------------------------------------------------------
     validator = self.validators.get(cat)
     if validator is None:
-      from jsonschema import Draft202012Validator,RefResolver
-      base = self.root/cat/'schema.json'
-      with base.open() as u: schema = json.load(u)
-      Draft202012Validator.check_schema(schema)
-      self.validators[cat] = validator = Draft202012Validator(schema=schema).evolve(resolver=RefResolver(f'file://{base}',{}))
+      self.validators[cat] = validator = Draft202012Validator(schema={'$ref':str(self.root/cat/'schema.json')},registry=self.registry)
     validator.validate(value)
 
   @cached_property
