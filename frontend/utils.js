@@ -40,6 +40,7 @@ function setFadeout(element,options) {
   // opacity: opacity of the fadeout menu
   const {duration,after,opacity} = Object.assign({duration:2.,after:1.,opacity:.5},options)
   const total = (duration+after)*1000, start = 1./(1.+duration/after)
+  element.style.opacity = opacity
 	element.addEventListener('mouseenter',(e)=>{
     for (const a of element.getAnimations()) { a.cancel() }
     element.style.opacity = opacity
