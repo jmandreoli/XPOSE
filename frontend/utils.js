@@ -70,20 +70,20 @@ function addVideoViewer(container,options) {
     })
   }
   {
-    const button = ctrl.xplay = addElement(menu,'button'); addText(button,'⏵︎')
+    const button = ctrl.xplay = addElement(menu,'button',{title:'toggle play/pause'}); addText(button,'⏵︎')
     button.addEventListener('click',(e)=>{
       if (video.paused) { video.play() } else { video.pause() }
     })
   }
   {
-    const select = ctrl.pbrate = addElement(menu,'select')
+    const select = ctrl.pbrate = addElement(menu,'select',{title:'speed rate'})
     for (const r of [.5,.75,1.,1.25,1.5,1.75,2.]) {
       select.appendChild(new Option(`${r}x`,r,undefined,(r==1.)))
     }
     select.addEventListener('change',(e)=>{video.playbackRate=e.target.value})
   }
   {
-    const button = ctrl.xfullscreen = addElement(menu,'button'); addText(button,'⛶')
+    const button = ctrl.xfullscreen = addElement(menu,'button',{title:'toggle fullscreen'}); addText(button,'⛶')
     button.addEventListener('click',(e)=>{
       let inv = '0%'
       if (document.fullscreenElement) { document.exitFullscreen() }
@@ -92,7 +92,7 @@ function addVideoViewer(container,options) {
     })
   }
   {
-    const div = addElement(menu,'div',{style:'float:right;padding-right:5mm;'})
+    const div = addElement(menu,'div',{style:'float:right;padding-right:5mm;',title:'volume control'})
     const canvas = ctrl.volume = addElement(div,'canvas',{width:100,height:15})
     let adjust = false
     for (const t of ['mousedown','mouseup','mouseleave','mousemove']) {
@@ -126,7 +126,6 @@ function addVideoViewer(container,options) {
       ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(wr,h); ctx.lineTo(wr,h-hr); ctx.closePath(); ctx.fill();
     })
   }
-  video.preload = 'metadata'
   return ctrl
 }
 
