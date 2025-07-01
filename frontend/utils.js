@@ -53,47 +53,60 @@ function setFadeout(element,options) {
 }
 
 function addVideoViewer(container,options) {
+  // offset: where to start the video
   // menuFadeout: configuration of menu fadeout
   // ...: html video element attributes (must include width and src)
-  const {width,menuFadeout,...videoOptions} = Object.assign({width:'640px',menuFadeout:{}},options)
+  const {width,menuFadeout,offset,...videoOptions} = Object.assign({width:'640px',offset:0,menuFadeout:{}},options)
   const div = addElement(container,'div',{style:`position:relative;width:${width};`})
   const video = addElement(div,'video',videoOptions)
   Object.assign(video.style,{width:'100%',':fullscreen':'width:100vw; height:100vh;'})
-  const style = 'display:flex;align-items:center;justify-content:center;position:absolute;bottom:0;width:100%;background-color:black;opacity:0;'
-  const menu = addElement(setFadeout(addElement(div,'div',{style:style}),menuFadeout),'div',{style:'width:100%;max-width:960px;'})
+  const style = 'position:absolute;bottom:0;width:100%;background-color:black;opacity:0;display:flex;align-items:center;justify-content:center;margin-bottom:3px'
+  const menu = addElement(setFadeout(addElement(div,'div',{style:style}),menuFadeout),'div',{style:'width:99%;max-width:960px;'})
+  const menuTop = addElement(menu,'div',{style:'width:100%;display:block flex;'})
+  const menuBot = addElement(menu,'div',{style:'width:100%;display:block flex;justify-content:space-between;'})
+  const menuLeft = addElement(menuBot,'div',{style:'flex:1;display:flex;flex-direction:row;'})
+  const menuRight = addElement(menuBot,'div',{style:'flex:1;display:flex;flex-direction:row-reverse;'})
   const ctrl = { video:video }
   {
-    const progress = ctrl.progress = addElement(menu,'progress',{value:0.,max:1.,style:'display:block;width:100%;'})
+    ctrl.timers = {}
+    const addTimer = (n)=>{
+      const timer = ctrl.timers[n] = addElement(menuTop,'span',{style:'font-size:x-small;font-family:monospace;color:white;'})
+      addText(timer,'.')
+    }
+    addTimer('left')
+    const progress = ctrl.progress = addElement(menuTop,'progress',{value:0.,max:1.,style:'flex:1;'})
+    addTimer('right')
     progress.addEventListener('click',(e)=>{
       const rect = e.target.getBoundingClientRect()
-      video.currentTime = video.duration*(e.x-rect.x)/rect.width
+      video.currentTime = offset + (video.duration-offset)*(e.x-rect.x)/rect.width
     })
   }
   {
-    const button = ctrl.xplay = addElement(menu,'button',{title:'toggle play/pause'}); addText(button,'⏵︎')
+    const button = ctrl.xplay = addElement(menuLeft,'button',{title:'toggle play/pause'}); addText(button,'⏵︎')
     button.addEventListener('click',(e)=>{
       if (video.paused) { video.play() } else { video.pause() }
     })
   }
   {
-    const select = ctrl.pbrate = addElement(menu,'select',{title:'speed rate'})
+    const select = ctrl.pbrate = addElement(menuLeft,'select',{title:'speed rate'})
     for (const r of [.5,.75,1.,1.25,1.5,1.75,2.]) {
       select.appendChild(new Option(`${r}x`,r,undefined,(r==1.)))
     }
     select.addEventListener('change',(e)=>{video.playbackRate=e.target.value})
   }
   {
-    const button = ctrl.xfullscreen = addElement(menu,'button',{title:'toggle fullscreen'}); addText(button,'⛶')
+    const button = ctrl.xfullscreen = addElement(menuLeft,'button',{title:'toggle fullscreen'}); addText(button,'⛶')
     button.addEventListener('click',(e)=>{
       let inv = '0%'
       if (document.fullscreenElement) { document.exitFullscreen() }
       else { video.parentElement.requestFullscreen(); inv = '100%' }
-      e.target.style.filter = `invert($inv)`
+      e.target.style.filter = `invert(${inv})`
     })
   }
   {
-    const div = addElement(menu,'div',{style:'float:right;padding-right:5mm;',title:'volume control'})
-    const canvas = ctrl.volume = addElement(div,'canvas',{width:100,height:15})
+    const canvas = ctrl.volume = addElement(menuRight,'canvas',{width:100,height:15,title:'volume control'})
+    const button = ctrl.xspeaker = addElement(menuRight,'button',{style:'border:none;'}); addText(button,'🔊')
+    button.addEventListener('click',(e)=>{ video.volume = video.volume?0.:1. })
     let adjust = false
     for (const t of ['mousedown','mouseup','mouseleave','mousemove']) {
       canvas.addEventListener(t,(e)=>{
@@ -110,8 +123,22 @@ function addVideoViewer(container,options) {
   }
   video.addEventListener('play',(e)=>{ctrl.xplay.textContent='⏸︎'})
   video.addEventListener('pause',(e)=>{ctrl.xplay.textContent='⏵'})
+  const formatTime = (d) => {
+    const ds = Math.trunc(d), dm = Math.trunc(ds/60), s = ds-60*dm, dh = Math.trunc(dm/60), m = dm-60*dh
+    return `${String(dh)}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+  }
   video.addEventListener('timeupdate',(e)=>{
-    if (video.duration) { ctrl.progress.value=video.currentTime/video.duration }
+    const d = video.duration
+    const v = {}
+    if (d) {
+      const currentTime = video.currentTime-offset, duration = d-offset
+      if (currentTime<0) { video.currentTime = offset; return }
+      for (const [n,t] of Object.entries({left:currentTime,right:duration-currentTime})) { v[n] = formatTime(t) }
+      v.progress = currentTime/duration
+    }
+    else { v.left = v.right = '.'; v.progress = 0; }
+    for (const [n,t] of Object.entries(ctrl.timers)) { t.innerText = v[n] }
+    ctrl.progress.value = v.progress
   })
   {
     const {width:w,height:h} = ctrl.volume, ctx = ctrl.volume.getContext('2d')
@@ -124,6 +151,7 @@ function addVideoViewer(container,options) {
       ctx.clearRect(0,0,w,h)
       ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(w,h); ctx.lineTo(w,0); ctx.closePath(); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(wr,h); ctx.lineTo(wr,h-hr); ctx.closePath(); ctx.fill();
+      ctrl.xspeaker.style.backgroundColor = e.target.volume?'':'red'
     })
   }
   return ctrl
@@ -139,31 +167,31 @@ function addDiapoViewer(container,options) {
   const menu = setFadeout(addElement(div,'div',{style:'position:absolute;top:0;left:0;width:100%;background-color:white;opacity:0;'}),menuFadeout)
   const ctrl = { img: img }
 	let current = 0
-	const display = () => {
-	  ctrl.blist.forEach((b,k)=>{ b.style.outline=(k==current?'thin solid blue':'') })
-		img.setAttribute('src',src[current])
+	const display = (current_) => {
+	  for (const [k,c] of [[current,''],[current_,'blue']]) ctrl.blist[k].style.backgroundColor = c
+	  current = current_; img.setAttribute('src',src[current])
 	}
   {
-    const button = ctrl.xfullscreen = addElement(menu,'button'); addText(button,'⛶')
+    const button = ctrl.xfullscreen = addElement(menu,'button',{title:'toggle fullscreen'}); addText(button,'⛶')
     button.addEventListener('click',(e)=>{
       let inv = '0%'
       if (document.fullscreenElement) { document.exitFullscreen() }
       else { img.parentElement.requestFullscreen(); inv = '100%' }
-      e.target.style.filter = `invert($inv)`
+      e.target.style.filter = `invert(${inv})`
     })
   }
   {
-    const sButton = (txt,callback) => {
-      const button = addElement(menu,'button',{style:'border:thin solid black;padding:1mm;fontFamily:monospace;'})
+    const sButton = (txt,tip,callback) => {
+      const button = addElement(menu,'button',{title:tip,style:'border:none;padding:1mm;fontFamily:monospace;'})
       addText(button,txt)
       button.addEventListener('click',callback)
       return button
     }
-    ctrl.bprev = sButton('◀',()=>{if (current--==0) current=src.length-1; display()})
-    ctrl.blist = src.map((a,k)=>{return sButton(String(k),()=>{current=k; display()})})
-    ctrl.bnext = sButton('▶',()=>{if (current++==src.length-1) current=0; display()})
+    ctrl.bprev = sButton('◀','previous image',()=>display(current==0?src.length-1:current-1))
+    ctrl.blist = src.map((a,k)=>sButton('🞔',`image ${k+1}`,()=>display(k)))
+    ctrl.bnext = sButton('▶','next image',()=>display(current==src.length-1?0:current+1))
   }
-	display()
+	display(0)
 	return ctrl
 }
 function addHeadMark(val,style) {
