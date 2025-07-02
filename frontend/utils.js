@@ -53,10 +53,11 @@ function setFadeout(element,options) {
 }
 
 function addVideoViewer(container,options) {
-  // offset: where to start the video
+  // segment: start-end of the video, in sec (optional; one component can be omitted)
   // menuFadeout: configuration of menu fadeout
   // ...: html video element attributes (must include width and src)
-  const {width,menuFadeout,offset,...videoOptions} = Object.assign({width:'640px',offset:0,menuFadeout:{}},options)
+  const {width,menuFadeout,segment,...videoOptions} = Object.assign({width:'640px',segment:[0,undefined],menuFadeout:{}},options)
+  const seg = segment?{start:segment[0]||0,duration:segment[1]?segment[1]-(segment[0]||0):null}:{start:0,duration:null}
   const div = addElement(container,'div',{style:`position:relative;width:${width};`})
   const video = addElement(div,'video',videoOptions)
   Object.assign(video.style,{width:'100%',':fullscreen':'width:100vw; height:100vh;'})
@@ -78,7 +79,7 @@ function addVideoViewer(container,options) {
     addTimer('right')
     progress.addEventListener('click',(e)=>{
       const rect = e.target.getBoundingClientRect()
-      video.currentTime = offset + (video.duration-offset)*(e.x-rect.x)/rect.width
+      if (video.duration) video.currentTime = seg.start+seg.duration*(e.x-rect.x)/rect.width
     })
   }
   {
@@ -121,6 +122,7 @@ function addVideoViewer(container,options) {
       })
     }
   }
+  video.addEventListener('loadedmetadata',(e)=>{if (seg.duration===null) {seg.duration=video.duration-seg.start}})
   video.addEventListener('play',(e)=>{ctrl.xplay.textContent='⏸︎'})
   video.addEventListener('pause',(e)=>{ctrl.xplay.textContent='⏵'})
   const formatTime = (d) => {
@@ -131,10 +133,11 @@ function addVideoViewer(container,options) {
     const d = video.duration
     const v = {}
     if (d) {
-      const currentTime = video.currentTime-offset, duration = d-offset
-      if (currentTime<0) { video.currentTime = offset; return }
-      for (const [n,t] of Object.entries({left:currentTime,right:duration-currentTime})) { v[n] = formatTime(t) }
-      v.progress = currentTime/duration
+      const currentTime = video.currentTime-seg.start
+      if (currentTime<0) { video.currentTime = seg.start; return }
+      else if (currentTime>seg.duration) { video.pause(); video.currentTime = seg.start; return }
+      for (const [n,t] of Object.entries({left:currentTime,right:seg.duration-currentTime})) { v[n] = formatTime(t) }
+      v.progress = currentTime/seg.duration
     }
     else { v.left = v.right = '.'; v.progress = 0; }
     for (const [n,t] of Object.entries(ctrl.timers)) { t.innerText = v[n] }
@@ -143,7 +146,7 @@ function addVideoViewer(container,options) {
   {
     const {width:w,height:h} = ctrl.volume, ctx = ctrl.volume.getContext('2d')
     const gr = ctx.fillStyle = ctx.createLinearGradient(0,h,w,0)
-    gr.addColorStop(0,'green');gr.addColorStop(.8,'green');gr.addColorStop(.85,'yellow');gr.addColorStop(.9,'orange');gr.addColorStop(1.,'red')
+    for (const [x,c] of [[0,'green'],[.8,'green'],[.85,'orange'],[.9,'darkorange'],[1.,'red']]) {gr.addColorStop(x,c)}
     ctx.strokeStyle = 'white'
     ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(w,h); ctx.lineTo(w,0); ctx.closePath(); ctx.fill(); ctx.stroke()
     video.addEventListener('volumechange',(e)=>{
