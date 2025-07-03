@@ -4,69 +4,62 @@
  * Purpose:              Xpose: client side utilities
  */
 
-function human_size (size) {
-  // size: int (number of bytes)
-  // returns a human readable string representing size
-  const thr = 1024.
-  const units = ['K','M','G','T','P','E','Z']
-  if (size<thr) return `${size}B`
-  size /= thr
-  for (const u of units) {
-    if (size<thr) return `${size.toFixed(2)}${u}iB`
-    size /= thr
-  }
-  return `${size}YiB` // :-)
-}
-
-function encodeURIqs(uri,parm) {
-  const q = Object.entries(parm).map((x)=>`${encodeURIComponent(x[0])}=${encodeURIComponent(x[1])}`).join('&')
-  return `${uri}?${q}`
-}
-
+// ================================================================================================
 function addElement(container,tag,attrs) {
 	const el = document.createElement(tag)
 	if (attrs) { for (const [k,v] of Object.entries(attrs)) {el.setAttribute(k,v)} }
 	container.appendChild(el)
 	return el
 }
+
+// ================================================================================================
+function addText(container,data) {
+  const text = document.createTextNode(data||' ')
+  container.appendChild(text)
+}
+
+// ================================================================================================
 function addJButton(container,icon,attrs) {
   const button = addElement(container,'button',attrs)
   addElement(button,'span',{class:`ui-icon ui-icon-${icon}`})
   return button
 }
-function setFadeout(element,options) {
-  // duration: duration (sec) of the fadeout
-  // after: wait time (sec) before fadeout
-  // opacity: opacity of the fadeout menu
-  const {duration,after,opacity} = Object.assign({duration:2.,after:1.,opacity:.5},options)
+
+// ================================================================================================
+function addDivWithFadingMenu(container,options) {
+  const {top,duration,after,opacity,style} = Object.assign({top:true,duration:2.,after:1.,opacity:.5,style:{main:'',menu:''}},options)
   const total = (duration+after)*1000, start = 1./(1.+duration/after)
-  element.style.opacity = opacity
-	element.addEventListener('mouseenter',(e)=>{
-    for (const a of element.getAnimations()) { a.cancel() }
-    element.style.opacity = opacity
+  const main = addElement(container,'div',{style:`position:relative;${style.main}`})
+  const menu = addElement(main,'div',{style:`position:absolute;${top?'top':'bottom'}:0;opacity:${opacity};${style.menu}`})
+	menu.addEventListener('mouseenter',(e)=>{
+    for (const a of e.target.getAnimations()) { a.cancel() }
+    e.target.style.opacity = opacity
   })
-  element.addEventListener('mouseleave',(e)=>{
-    element.style.opacity = 0.
-    element.animate([{opacity:opacity},{opacity:opacity,offset:start},{opacity:0.}],total)
+  menu.addEventListener('mouseleave',(e)=>{
+    e.target.style.opacity = 0.
+    e.target.animate([{opacity:opacity},{opacity:opacity,offset:start},{opacity:0.}],total)
   })
-  return element
+  return {main:main,menu:menu}
 }
 
+// ================================================================================================
 function addVideoViewer(container,options) {
-  // segment: start-end of the video, in sec (optional; one component can be omitted)
-  // menuFadeout: configuration of menu fadeout
-  // ...: html video element attributes (must include width and src)
-  const {width,menuFadeout,segment,...videoOptions} = Object.assign({width:'640px',segment:[0,undefined],menuFadeout:{}},options)
-  const seg = segment?{start:segment[0]||0,duration:segment[1]?segment[1]-(segment[0]||0):null}:{start:0,duration:null}
-  const div = addElement(container,'div',{style:`position:relative;width:${width};`})
-  const video = addElement(div,'video',videoOptions)
-  Object.assign(video.style,{width:'100%',':fullscreen':'width:100vw; height:100vh;'})
-  const style = 'position:absolute;bottom:0;width:100%;background-color:black;opacity:0;display:flex;align-items:center;justify-content:center;margin-bottom:3px'
-  const menu = addElement(setFadeout(addElement(div,'div',{style:style}),menuFadeout),'div',{style:'width:99%;max-width:960px;'})
-  const menuTop = addElement(menu,'div',{style:'width:100%;display:block flex;'})
-  const menuBot = addElement(menu,'div',{style:'width:100%;display:block flex;justify-content:space-between;'})
+  // segment: start-end of the video, in sec (undefined, or a pair of number-or-undefined)
+  // menu: configuration of fading menu (no style allowed)
+  // ...: html video element attributes (must include src)
+  const {segment,menu:menuOptions,...videoOptions} = Object.assign({segment:[undefined,undefined],menu:{}},options)
+  const seg = {start:segment[0]||0,end:segment[1]||1e9}
+  const style = {
+    main:'outline:thin solid white;display:flex;align-items:center;justify-content:center;',
+    menu:'width:100%;background-color:black;display:flex;align-items:center;justify-content:center;'
+  }
+  const {main,menu} = addDivWithFadingMenu(container,{style:style,...menuOptions})
+  const menuIn = addElement(menu,'div',{style:'width:99%;max-width:960px;'})
+  const menuTop = addElement(menuIn,'div',{style:'width:100%;display:block flex;'})
+  const menuBot = addElement(menuIn,'div',{style:'width:100%;display:block flex;justify-content:space-between;'})
   const menuLeft = addElement(menuBot,'div',{style:'flex:1;display:flex;flex-direction:row;'})
   const menuRight = addElement(menuBot,'div',{style:'flex:1;display:flex;flex-direction:row-reverse;'})
+  const video = addElement(main,'video',{style:'width:100%;max-height:100%;'+(videoOptions.style||'')})
   const ctrl = { video:video }
   {
     ctrl.timers = {}
@@ -122,7 +115,9 @@ function addVideoViewer(container,options) {
       })
     }
   }
-  video.addEventListener('loadedmetadata',(e)=>{if (seg.duration===null) {seg.duration=video.duration-seg.start}})
+  video.addEventListener('loadedmetadata',(e)=>{
+    seg.start=Math.max(0,seg.start); seg.end=Math.min(video.duration,seg.end); seg.duration=seg.end-seg.start
+  })
   video.addEventListener('play',(e)=>{ctrl.xplay.textContent='⏸︎'})
   video.addEventListener('pause',(e)=>{ctrl.xplay.textContent='⏵'})
   const formatTime = (d) => {
@@ -157,17 +152,22 @@ function addVideoViewer(container,options) {
       ctrl.xspeaker.style.backgroundColor = e.target.volume?'':'red'
     })
   }
+  { const {style,...options} = videoOptions; Object.assign(video,options) }
   return ctrl
 }
 
+// ================================================================================================
 function addDiapoViewer(container,options) {
-  // menuFadeout: configuration of menu fadeout
   // src: list of urls of images
-  // ...: html img element attributes (must include width but not src)
-  const {width,menuFadeout,src,...diapoOptions} = Object.assign({width:'640px',menuFadeout:{},src:[]},options)
-	const div = addElement(container,'div',{style:`position:relative;width:${width}`})
-	const img = addElement(div,'img',{style:'width:100%;'})
-  const menu = setFadeout(addElement(div,'div',{style:'position:absolute;top:0;left:0;width:100%;background-color:white;opacity:0;'}),menuFadeout)
+  // menu: configuration of fading menu (no style allowed)
+  // ...: html img element attributes (except src)
+  const {src,menu:menuOptions,...diapoOptions} = Object.assign({src:[],menu:{}},options)
+  const style = {
+    main:'outline:thin solid white;display:flex;align-items:center;justify-content:center;',
+    menu:'width:100%;background-color:black;display:flex;align-items:center;justify-content:center;'
+  }
+  const {main,menu} = addDivWithFadingMenu(container,{style:style,...menuOptions})
+	const img = addElement(main,'img',{style:'max-width:100%; max-height:100%;'+(diapoOptions.style||'')})
   const ctrl = { img: img }
 	let current = 0
 	const display = (current_) => {
@@ -194,9 +194,12 @@ function addDiapoViewer(container,options) {
     ctrl.blist = src.map((a,k)=>sButton('🞔',`image ${k+1}`,()=>display(k)))
     ctrl.bnext = sButton('▶','next image',()=>display(current==src.length-1?0:current+1))
   }
+	{ const {style,...options} = diapoOptions; Object.assign(img,options) }
 	display(0)
 	return ctrl
 }
+
+// ================================================================================================
 function addHeadMark(val,style) {
   const [div,div_] = [1,2].map(()=>document.createElement('div')); document.body.prepend(div,div_); div.innerText = val
   const style_ = {position:'fixed',left:'0',right:'0',top:'0',zIndex:'100',backgroundColor:'pink',textAlign:'center',fontSize:'x-large'}
@@ -204,10 +207,29 @@ function addHeadMark(val,style) {
   Object.assign(div.style,style_)
   Object.assign(div_.style,{height:`${div.offsetHeight}px`})
 }
-function addText(container,data) {
-  const text = document.createTextNode(data||' ')
-  container.appendChild(text)
+
+// ================================================================================================
+function human_size (size) {
+  // size: int (number of bytes)
+  // returns a human readable string representing size
+  const thr = 1024.
+  const units = ['K','M','G','T','P','E','Z']
+  if (size<thr) return `${size}B`
+  size /= thr
+  for (const u of units) {
+    if (size<thr) return `${size.toFixed(2)}${u}iB`
+    size /= thr
+  }
+  return `${size}YiB` // :-)
 }
+
+// ================================================================================================
+function encodeURIqs(uri,parm) {
+  const q = Object.entries(parm).map((x)=>`${encodeURIComponent(x[0])}=${encodeURIComponent(x[1])}`).join('&')
+  return `${uri}?${q}`
+}
+
+// ================================================================================================
 function toggle_display (el) { el.style.display = (el.style.display?'':'none') }
 function unsavedConfirm () { return window.confirm('Unsaved changes will be lost. Are you sure you want to proceed ?') }
 function deleteConfirm () { return window.confirm('Are you sure you want to delete this entry ?') }
